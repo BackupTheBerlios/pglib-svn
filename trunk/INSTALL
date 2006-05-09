@@ -1,0 +1,4 @@
+In the current version there is no setup file.
+Just copy the package where you want; 
+at least make sure that the bin directory is in your PATH.
+

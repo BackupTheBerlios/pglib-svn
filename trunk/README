@@ -1,0 +1,22 @@
+THIS SOFTWARE IS UNDER MIT LICENSE.  
+Copyright (C) 2005 Manlio Perillo
+
+Read LICENSE file for more informations.
+
+
+INTRODUCTION: 
+pqlib is an implementation of the PostgreSQL Protocol, version 3.0, in
+Python and Twisted.
+
+It is somewhat similar to pgasync but it is a more usable and complete
+implementation, that try to follow the interface of the official C libpq.
+
+
+TODO:
+Support the extended query protocol
+
+
+REQUIREMENTS: 
+Python 2.4 (http://python.org/)
+Twisted 2.2 (http://twistedmatrix.com)
+
