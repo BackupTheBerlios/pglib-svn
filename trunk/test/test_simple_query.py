@@ -26,24 +26,65 @@ user = "pqlib"
 password = "test"
 
 
+def cbLogin(result, proto):
+    print "OK"
+    print result
+        
+    proto.query("BEGIN; SELECT x"
+                ).addCallback(cbQuery, proto
+                              ).addErrback(ebQuery, proto)
+
+def ebLogin(reason):
+    print "ERROR"
+    print reason.raiseException()
+
+    reactor.stop()
+
+
+def cbQuery(result, proto):
+    print "QUERY OK"
+    print result
+
+    
+    
+
+def ebQuery(reason, proto):
+    print "QUERY ERROR"
+    print reason
+
+    if 0:
+        query = "ROLLBACK"
+    else:
+        query = "SELECT 1" # + "; COMMIT"
+
+    proto.query(query
+                ).addCallback(cbQuery2, proto
+                              ).addErrback(ebQuery2, proto)
+    
+def cbQuery2(result, proto):
+    print "QUERY OK"
+    print result
+
+    
+    reactor.stop()
+
+
+def ebQuery2(reason, proto):
+    print "QUERY ERROR"
+    print reason
+
+    reactor.stop()
+
+
+    
 class Test(protocol.PgProtocol):
     def connectionMade(self):
         print "connection made"
-        self.login(user=user, password=password)
-
-        self.count = 0
-
-    def message_Z(self, transStatus):
-        print "transaction status:", transStatus
-    
-        if self.count == 0:
-            self.query("BEGIN; SELECT x")
-        elif self.count == 1:
-            self.query("ROLLBACK") #"SELECT 1")#COMMIT")
-        elif self.count == 2:
-            self.query("CREATE TABLE test (x INTEGER)")
+        self.login(user=user, password=password
+                   ).addCallback(cbLogin, self
+                                 ).addErrback(ebLogin)
         
-        self.count += 1
+
 
 class TestFactory(ClientFactory):
     protocol = Test

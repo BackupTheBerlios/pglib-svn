@@ -20,16 +20,34 @@ import protocol
 
 
 
+# XXX TODO use one user for each authentication method supported
 host = "localhost"
 port = 5432
 user = "pqlib"
 password = "test"
 
 
+def cbLogin(result, proto):
+    print "OK"
+    print result
+    proto.terminate()
+    
+    reactor.stop()
+
+def ebLogin(reason):
+    print "ERROR"
+    reason.raiseException()
+
+    reactor.stop()
+
+
+
 class Test(protocol.PgProtocol):
     def connectionMade(self):
         print "connection made"
-        self.login(user=user, password=password)
+        self.login(user=user, password=password
+                   ).addCallback(cbLogin, self
+                                 ).addErrback(ebLogin)
 
 
 class TestFactory(ClientFactory):
