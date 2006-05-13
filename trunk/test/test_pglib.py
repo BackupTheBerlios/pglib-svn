@@ -75,7 +75,6 @@ class TestLogin(TestCaseCommon):
     
     def testClearText(self):
         def callback(params):
-            print params
             self.failUnless(isinstance(params, dict))
         
         d = self.protocol.login(
@@ -104,7 +103,6 @@ class TestLogin(TestCaseCommon):
     
     def testMD5(self):
         def callback(params):
-            print params
             self.failUnless(isinstance(params, dict))
         
         d = self.protocol.login(
@@ -120,8 +118,6 @@ class TestSimpleQuery(TestCaseCommon):
             return self.protocol.query("SELECT 1")
             
         def cbQuery(result):
-            print self.protocol.status
-            print self.protocol.transactionStatus
             self.failUnlessEqual(self.protocol.status,
                                  protocol.CONNECTION_OK)
 
@@ -145,8 +141,6 @@ class TestSimpleQuery(TestCaseCommon):
             return self.protocol.query("BEGIN; SELECT 1")
             
         def cbQuery(result):
-            print self.protocol.status
-            print self.protocol.transactionStatus
             self.failUnlessEqual(self.protocol.status,
                                  protocol.CONNECTION_OK)
 
@@ -163,8 +157,6 @@ class TestSimpleQuery(TestCaseCommon):
             return self.protocol.query("BEGIN; SELECT xxx")
             
         def ebQuery(reason):
-            print self.protocol.status
-            print self.protocol.transactionStatus
             self.failUnlessEqual(self.protocol.status,
                                  protocol.CONNECTION_OK)
 
@@ -177,3 +169,15 @@ class TestSimpleQuery(TestCaseCommon):
                                      ).addErrback(ebQuery
                                                   )
         return self.failUnlessFailure(d, protocol.PgError)
+
+    def testMultipleQuery(self):
+        def query(result, i):
+            print "i =", i
+            return self.protocol.query("SELECT %d" % i)
+        
+        
+        d = self.login().addCallback(query, 0)
+        for i in range(1, 5):
+            d.addCallback(query, i)
+
+        return d
