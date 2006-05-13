@@ -25,21 +25,21 @@ PG_PROTO_VERSION = (PG_VERSION_MAJOR << 16) | PG_VERSION_MINOR
 CONNECTION_STARTED = 0 # waiting for connection to be made
 CONNECTION_MADE = 1 # connection ok; waiting to send
 CONNECTION_AWAITING_RESPONSE = 2 # waiting for a response from the
-                                 # server
+                                 # server # XXX what response?
 CONNECTION_AUTH_OK = 3 # received authetication; waitig for backend
                        # start-up finish
 CONNECTION_SSL_STARTUP = 4 # negotiating SS encryption
 CONNECTION_SETENV = 5 # negotiating enviroment-driven parameter
                       # settings # XXX what is this?
 CONNECTION_OK = 6 # connection ok; backend ready
-CONNECTION_BAD = -1 # connection procedure failed
+CONNECTION_BAD = None # connection procedure failed
 
 # transaction status
 PGTRANS_IDLE = "I" # currently idle
 PGTRANS_INTRANS = "T" # idle, in a valid transaction block
 PGTRANS_INERROR = "E" # idle, in a failed transaction block
-PGTRANS_ACTIVE = 1 # a command is in progress
-PGTRANS_UNKNOWN = 0 # the connection is bad
+PGTRANS_ACTIVE = "A" # a command is in progress (use only in the frontend)
+PGTRANS_UNKNOWN = None # the connection is bad # XXX
 
 PG_HEADER_SIZE = 5 # 1 byte opcode + 4 byte lenght
 
@@ -57,7 +57,12 @@ class PgConnectionOption(object):
         self.compiled = {}
         self.options = {}
 
-class PgError(Exception):
+
+# exception class hierarchy
+class Error(Exception):
+    pass
+
+class PgError(Error):
     """XXX TODO
     """
     
@@ -67,12 +72,27 @@ class PgError(Exception):
     def __str__(self):
         return str(self.args)
 
+class InvalidRequest(Error):
+    pass
+
+class AuthenticationError(Error):
+    pass
+
+class UnsupportedError(Error):
+    pass
 
 class PgResult(object):
     """XXX TODO
     """
 
+class PgCancel(object):
+    """XXX TODO
+    """
+
 class PgRequest(object):
+    """A wrapper for a request to the backend.
+    """
+    
     def __init__(self, opcode, payload):
         self.opcode = opcode
         self.payload = payload
@@ -88,7 +108,7 @@ class PgProtocol(protocol.Protocol):
 
     We also choose to not support multiple result set (for simple
     query with multiple commands), but you can retrieve all the result
-    by suppling yur RowConsumer
+    by suppling your own RowConsumer.
 
     Whenever possible, we try to follow the interface of libpq.
     """
@@ -116,20 +136,20 @@ class PgProtocol(protocol.Protocol):
         self._last = None # last request we made
 
     def connectionMade(self):
-        """Override this to be notified when the connection is done.
-        """
-        
         self.status = CONNECTION_MADE
 
+        self.factory.clientConnectionMade(self)
+
     def connectionLost(self, reason=protocol.connectionDone):
-        print "connection lost", reason
+        #log.msg("connection lost", reason)
         
+        self.status = CONNECTION_BAD
         self.transactionStatus = PGTRANS_UNKNOWN
     
     def dataReceived(self, data):
         """Handle raw data arrived from postgres backend.
 
-        XXX TODO use cStringIO as in pgasync
+        XXX TODO use cStringIO as in pgasync, but DO tests.
         """
 
         self._buffer = self._buffer + data
@@ -139,14 +159,13 @@ class PgProtocol(protocol.Protocol):
             opcode, size = unpack("!cI",
                                   self._buffer[:PG_HEADER_SIZE])
 
-            size = size - 4 # the lenght does not include the message type
+            size = size - 4 # the lenght count includes itself
             if len(self._buffer) < size + PG_HEADER_SIZE:
                 break
             
-            payload = self._buffer[PG_HEADER_SIZE : size + PG_HEADER_SIZE]
+            payload = self._buffer[PG_HEADER_SIZE:size + PG_HEADER_SIZE]
             self._buffer = self._buffer[size + PG_HEADER_SIZE:]
 
-            
             self.messageReceived(opcode, payload)
 
 
@@ -154,14 +173,21 @@ class PgProtocol(protocol.Protocol):
         """Send the given message to the backend.
         """
         
-        if not self._queue:
-            # send the message now
-            self._last = request
-            self._sendMessage(request.opcode, request.payload)
-        else:
-            self._queue.append(request)
+        self._queue.append(request)
+        self._flush()
 
         return request.deferred
+
+    def _flush(self):
+        # send the next queued request
+
+        if self._queue:
+            request = self._queue.pop(0)
+            
+            self._last = request
+            self.transactionStatus = PGTRANS_ACTIVE
+            
+            self._sendMessage(request.opcode, request.payload)
 
     def _sendMessage(self, opcode, payload):
         # internal helper
@@ -169,18 +195,29 @@ class PgProtocol(protocol.Protocol):
         header = pack("!cI", opcode, len(payload) + 4)
         self.transport.write(header + payload)
 
+        log.msg("request sent:", opcode)
+            
     def messageReceived(self, opcode, payload):
         """Handle the message.
         """
 
-        print "message received:", opcode
+        log.msg("message received:", opcode)
         
         # dispatch the message using python introspection
         method = getattr(self, "message_" + opcode, None)
         
         if method is None:
-            log.err("Invalid message: " + opcode)
-            self.transport.loseConnection() # XXX
+            error = InvalidRequest(opcode)
+            
+            # XXX
+            if self._last is not None:
+                self._last.deferred.errback(error)
+            else:
+                log.err(error)
+            
+            # we close the connection, as suggested in the protocol
+            # specification
+            self.transport.loseConnection()
             return
  
         method(payload)
@@ -189,7 +226,7 @@ class PgProtocol(protocol.Protocol):
     #
     # backend messages handling
     #
-    # Basic
+    # Start-Up
     #
     def message_E(self, data):
         """ErrorResponse: an error occurred.
@@ -197,14 +234,18 @@ class PgProtocol(protocol.Protocol):
         For error message types see protocol documentation.
         """
         
+        error = {}
         for item in data.split("\0")[:-2]:
             key, val = item[:1], item[1:]
-            self.lastError[key] = val
+            error[key] = val
 
+        self.lastError = error
+        log.msg("ERROR:", str(error))
+        
         # check if we failed the authentication
         if self._last.opcode is None:
             self.status = CONNECTION_BAD
-            self._last.deferred.errback(PgError(self.lastError)) # XXX
+            self._last.deferred.errback(PgError(error))
             self.transport.loseConnection()
         
     def message_N(self, data):
@@ -213,12 +254,14 @@ class PgProtocol(protocol.Protocol):
         For warning message types see protocol documentation.
         """
 
+        notice = {}
         for item in data.split("\0")[:-2]:
             key, val = item[:1], item[1:]
-            self.lastNotice[key] = val
+            notice[key] = val
 
-        print "Notice"
-        print self.lastNotice
+        self.lastNotice = notice
+        
+        log.msg("Notice:", str(notice))
         
     def message_R(self, data):
         """Authentication: authentication request.
@@ -228,12 +271,12 @@ class PgProtocol(protocol.Protocol):
 
         method = getattr(self, "_auth_%s" % authtype, None)
         if not method:
-            err = RuntimeError("Authentication not supported '%d'" % authtype) # XXX 
+            error = UnsupportedError("Authentication",  authtype)
             
-            assert self._last.payload is None
-            self._last.deferred.errback(err)
-        
+            self._last.deferred.errback(error)
             self.transport.loseConnection()
+
+        self.status = CONNECTION_AWAITING_RESPONSE # XXX
 
         method(data[4:])
 
@@ -248,11 +291,15 @@ class PgProtocol(protocol.Protocol):
         required.
         """
         
-        print "auth pass"
+        log.msg("auth pass")
 
         if self.password is None:
-            raise RuntimeError("password is required")
+            error = AuthenticationError("password is required")
+            self._last.deferred.errback(error)
 
+            self.transport.loseConnection()
+            return
+        
         self.passwordMessage(self.password)
 
     def _auth_5(self, salt):
@@ -262,10 +309,14 @@ class PgProtocol(protocol.Protocol):
         md5hex(md5hex(password + user) + salt)
         """
         
-        print "auth md5"
+        log.msg("auth md5")
 
         if self.password is None:
-            raise RuntimeError("password is required")
+            error = AuthenticationError("password is required")
+            self._last.deferred.errback(error)
+
+            self.transport.loseConnection()
+            return
 
         hash = md5.new(self.password + self.user).hexdigest()
         password = "md5" + md5.new(hash  + salt).hexdigest()
@@ -288,29 +339,36 @@ class PgProtocol(protocol.Protocol):
     def message_Z(self, transactionStatus):
         """ReadyForQuery: the backend is ready for a new query cycle.
         """
-
+        
         self.transactionStatus = transactionStatus
-                
+
+        assert self._last
+        deferred = self._last.deferred
+        self._last = None
+        
         if self.lastError:
-            self._last.deferred.errback(PgError(self.lastError))
+            deferred.errback(PgError(self.lastError))
             self.lastError = {}
             return
         
-        if self.status == CONNECTION_AUTH_OK:
-            self._last.deferred.callback(self.parameterStatus)
-        else:
-            self._last.deferred.callback(self.lastResult)
-            self.lastResult = None
-        
+        oldStatus = self.status
         self.status = CONNECTION_OK
-    
+        
+        if oldStatus == CONNECTION_AUTH_OK:
+            deferred.callback(self.parameterStatus)
+        else:
+            deferred.callback(self.lastResult)
+        
+        # send the next request
+        self._flush()
+
     #
-    # Query
+    # Simple Query
     #
     def message_C(self, tag):
         """CommandComplete: an SQL command completed normally.
         
-        Note that a query can contain more than one command.
+        Note that a simple query can contain more than one command.
         """
 
         print "command complete", tag
@@ -337,9 +395,15 @@ class PgProtocol(protocol.Protocol):
     # 
     # frontend messages handling
     #
-    def login(self, **kwargs):
+    def login(self, sslmode="prefer", **kwargs):
         """StartupMessage: login to the PostgreSQL database
 
+        sslmode can be:
+          disable
+          allow
+          prefer
+          require
+        
         The only required option is user.
         Optional parameters is database.
 
@@ -381,7 +445,7 @@ class PgProtocol(protocol.Protocol):
     def passwordMessage(self, password):
         """PasswordMessage: send a password response.
 
-        internal function.
+        internal method.
         """
 
         self._sendMessage("p", password + "\0")
@@ -404,7 +468,7 @@ class PgProtocol(protocol.Protocol):
 	
 
 
-class PQFactory(protocol.ClientFactory):
+class PgFactory(protocol.ClientFactory):
     """A simple factory that manages PgProtocol.
     """
     
@@ -413,7 +477,10 @@ class PQFactory(protocol.ClientFactory):
         protocol = PgProtocol()
         protocol.factory = self
         return protocol
-        
+    
+    def clientConnectionMade(self, protocol):
+        pass
+
     def clientConnectionFailed(self, connector, reason):
-        print reason
+        pass
 
