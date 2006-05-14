@@ -111,11 +111,15 @@ class TestLogin(TestCaseCommon):
         
         return d.addCallback(callback)
 
+    def testNoUser(self):
+        d = self.protocol.login(database="pglib")
+        return self.failUnlessFailure(d, protocol.AuthenticationError)
     
+
 class TestSimpleQuery(TestCaseCommon):
     def testQuery(self):
         def cbLogin(params):
-            return self.protocol.query("SELECT 1")
+            return self.protocol.execute("SELECT 1")
             
         def cbQuery(result):
             self.failUnlessEqual(self.protocol.status,
@@ -131,14 +135,14 @@ class TestSimpleQuery(TestCaseCommon):
 
     def testQueryFail(self):
         def cbLogin(params):
-            return self.protocol.query("SELECT xxx")
+            return self.protocol.execute("SELECT xxx")
             
         d = self.login().addCallback(cbLogin)
         return self.failUnlessFailure(d, protocol.PgError)
 
     def testTransaction(self):
         def cbLogin(params):
-            return self.protocol.query("BEGIN; SELECT 1")
+            return self.protocol.execute("BEGIN; SELECT 1")
             
         def cbQuery(result):
             self.failUnlessEqual(self.protocol.status,
@@ -154,7 +158,7 @@ class TestSimpleQuery(TestCaseCommon):
 
     def testTransactionFail(self):
         def cbLogin(params):
-            return self.protocol.query("BEGIN; SELECT xxx")
+            return self.protocol.execute("BEGIN; SELECT xxx")
             
         def ebQuery(reason):
             self.failUnlessEqual(self.protocol.status,
@@ -173,7 +177,7 @@ class TestSimpleQuery(TestCaseCommon):
     def testMultipleQuery(self):
         def query(result, i):
             print "i =", i
-            return self.protocol.query("SELECT %d" % i)
+            return self.protocol.execute("SELECT %d" % i)
         
         
         d = self.login().addCallback(query, 0)

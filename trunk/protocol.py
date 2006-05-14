@@ -21,7 +21,7 @@ PG_VERSION_MAJOR = 3
 PG_VERSION_MINOR = 0
 PG_PROTO_VERSION = (PG_VERSION_MAJOR << 16) | PG_VERSION_MINOR 
 
-# connection status
+# connection status (XXX not realy useful here)
 CONNECTION_STARTED = 0 # waiting for connection to be made
 CONNECTION_MADE = 1 # connection ok; waiting to send
 CONNECTION_AWAITING_RESPONSE = 2 # waiting for a response from the
@@ -48,7 +48,7 @@ PG_HEADER_SIZE = 5 # 1 byte opcode + 4 byte lenght
 class PgConnectionOption(object):
     """Class for storing connection options.
 
-    XXX TODO
+    XXX TODO (move to fe.py)
     """
 
     def __init__(self, **kwargs):
@@ -122,13 +122,16 @@ class PgProtocol(protocol.Protocol):
     lastResult = None
     lastNotice = {}
     lastError = {}
+    lastNotification = None
     
-    protocolVersion = 3.0 # we support only this
+    protocolVersion = 3 # we support only this
     serverVersion = None # XXX
     backendPID = None
 
     
-    def __init__(self):
+    def __init__(self, addr):
+        self.addr = addr # used by cancel
+        
         # cancellation key used for cancel a query in progress
         self.cancelKey = None
         
@@ -285,6 +288,10 @@ class PgProtocol(protocol.Protocol):
         """
         
         self.status = CONNECTION_AUTH_OK
+
+        # these are no more needed
+        del self._user
+        del self._password
         
     def _auth_3(self, data=None):
         """AuthenticationCleartextPassword: cleartext password is
@@ -293,14 +300,14 @@ class PgProtocol(protocol.Protocol):
         
         log.msg("auth pass")
 
-        if self.password is None:
+        if self._password is None:
             error = AuthenticationError("password is required")
             self._last.deferred.errback(error)
 
             self.transport.loseConnection()
             return
         
-        self.passwordMessage(self.password)
+        self.passwordMessage(self._password)
 
     def _auth_5(self, salt):
         """AuthenticationMD5Password: an MD5-encrypted password is
@@ -311,14 +318,14 @@ class PgProtocol(protocol.Protocol):
         
         log.msg("auth md5")
 
-        if self.password is None:
+        if self._password is None:
             error = AuthenticationError("password is required")
             self._last.deferred.errback(error)
 
             self.transport.loseConnection()
             return
 
-        hash = md5.new(self.password + self.user).hexdigest()
+        hash = md5.new(self._password + self._user).hexdigest()
         password = "md5" + md5.new(hash  + salt).hexdigest()
         
         self.passwordMessage(password)
@@ -355,6 +362,12 @@ class PgProtocol(protocol.Protocol):
         self.status = CONNECTION_OK
         
         if oldStatus == CONNECTION_AUTH_OK:
+            # compute the server version, as required by the libpq
+            # interface
+            version = self.parameterStatus["server_version"]
+            major, minor, rev = map(int, version.split("."))
+            self.serverVersion = rev + minor * 100 + major * 10000
+            
             deferred.callback(self.parameterStatus)
         else:
             deferred.callback(self.lastResult)
@@ -414,17 +427,20 @@ class PgProtocol(protocol.Protocol):
         password files.
         """
 
-        self.user = kwargs.get("user", None)
-        self.password = kwargs.get("password", None)
+        parameters = kwargs.copy()
         
-        if not self.user:
-            raise RuntimeError("user is required")
+        self._user = parameters.get("user", None)
+        self._password = parameters.get("password", None)
         
-        if self.password:
-            del kwargs["password"]
+        if self._user is None:
+            return defer.fail(AuthenticationError("user is required"))
+        
+        if self._password:
+            # the password is not required now
+            del parameters["password"]
         
         options = []
-        for key, val in kwargs.iteritems():
+        for key, val in parameters.iteritems():
             options.append(key)
             options.append(val)
 
@@ -450,14 +466,16 @@ class PgProtocol(protocol.Protocol):
 
         self._sendMessage("p", password + "\0")
 
-    def query(self, query):
+    def execute(self, query, *args, **kwargs):
         """Query: execute a simple query.
+        
+        XXX TODO string interpolation and escaping.
         """
 
         request = PgRequest("Q", query + "\0")
         return self.sendMessage(request)
 
-    def terminate(self):
+    def finish(self):
         """Terminate: issue a disconnection packet and disconnect.
         """
         
@@ -473,8 +491,8 @@ class PgFactory(protocol.ClientFactory):
     """
     
 
-    def buildProtocol(self,addr):
-        protocol = PgProtocol()
+    def buildProtocol(self, addr):
+        protocol = PgProtocol(addr)
         protocol.factory = self
         return protocol
     
