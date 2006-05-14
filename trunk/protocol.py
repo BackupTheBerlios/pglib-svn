@@ -89,6 +89,12 @@ class PgCancel(object):
     """XXX TODO
     """
 
+class Notification(object):
+    def __init__(self, pid, name, extra=None):
+        self.pid = pid
+        self.name = name
+        self.extra = extra
+
 class PgRequest(object):
     """A wrapper for a request to the backend.
     """
@@ -421,8 +427,25 @@ class PgProtocol(protocol.Protocol):
             self.lastResult = None
         else:
             self.lastResult = data[4:]
-        
+     
     
+    #
+    # COPY Operations
+    #
+    
+    #
+    # Asynchronous Operations
+    #
+    def message_A(self, data):
+        """NotificationResponse: an asyncronous notification.
+        """
+
+        (pid,) = unpack("!I", data[:4])
+        name, extra, _ = data[4:].split("\0")
+
+        # XXX save only the last notification
+        self.lastNotification = Notification(pid, name, extra)
+        
     # 
     # frontend messages handling
     #
@@ -516,7 +539,7 @@ class PgProtocol(protocol.Protocol):
         request = PgRequest("F", payload)
 
         return self.sendMessage(request)
-        
+    
     def finish(self):
         """Terminate: issue a disconnection packet and disconnect.
         """

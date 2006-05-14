@@ -28,6 +28,21 @@ port = 5432
 echoOid = 19196
 loopOid = 19197
 
+
+# utility function
+def waitFor(secs):
+    """Return a deferred that will fire after the specified amount of
+    seconds.
+    """
+    
+    from twisted.internet import reactor
+    
+    d = defer.Deferred()
+    reactor.callLater(secs, lambda: d.callback(None))
+    
+    return d
+
+
 class TestFactory(protocol.PgFactory):
     def __init__(self):
         self.deferred = defer.Deferred()
@@ -207,3 +222,26 @@ class TestFunctionCall(TestCaseCommon):
         return d.addCallback(cbLogin
                              ).addCallback(cbCall
                                            )
+
+
+class TestNotification(TestCaseCommon):
+    def testNotification(self):
+        def cbLogin(params):
+            # register oursel for listening a notification, and raise it
+            return self.protocol.execute(
+                "LISTEN pglib; NOTIFY pglib;"
+                )
+            
+        def cbQuery(result):
+            return waitFor(0.5)
+
+
+        def cbNotify(result):
+            notification = self.protocol.lastNotification
+            self.failUnlessEqual(notification.name, "pglib")
+        
+        d = self.login()
+        return d.addCallback(cbLogin
+                             ).addCallback(cbQuery
+                                           ).addCallback(cbNotify
+                                                         )
