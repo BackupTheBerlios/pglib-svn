@@ -23,6 +23,10 @@ import protocol
 host = "localhost"
 port = 5432
 
+# test functions oids (you have to know this) # XXX
+# SELECT oid FROM pg_proc WHERE proname = 'echo';
+echoOid = 19196
+loopOid = 19197
 
 class TestFactory(protocol.PgFactory):
     def __init__(self):
@@ -41,6 +45,8 @@ class TestFactory(protocol.PgFactory):
 class TestCaseCommon(unittest.TestCase):
     """Common methods for our Test Case
     """
+    
+    timeout = 1
     
     def setUp(self):
         def setup(protocol):
@@ -185,3 +191,19 @@ class TestSimpleQuery(TestCaseCommon):
             d.addCallback(query, i)
 
         return d
+
+
+class TestFunctionCall(TestCaseCommon):
+    def testFunction(self):
+        def cbLogin(params):
+            # call the echo function
+            return self.protocol.fn(echoOid, 0, 'echo')
+            
+        def cbCall(result):
+            self.failUnlessEqual(result, 'echo')
+
+        
+        d = self.login()
+        return d.addCallback(cbLogin
+                             ).addCallback(cbCall
+                                           )

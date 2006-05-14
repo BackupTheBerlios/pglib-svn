@@ -405,6 +405,24 @@ class PgProtocol(protocol.Protocol):
         print "empty query"
         
     
+    #
+    # Function Call (aka Fast Path Interface)
+    #
+    # Note: this seems to be obsolete, but it is still used (and is much
+    # simpler) for large objects support by libpq
+    def message_V(self, data):
+        """FunctionCallResponse: the result from a function call.
+        """
+
+        (length,) = unpack("!I", data[:4])
+        
+        if length == -1:
+            # NULL returned
+            self.lastResult = None
+        else:
+            self.lastResult = data[4:]
+        
+    
     # 
     # frontend messages handling
     #
@@ -475,6 +493,30 @@ class PgProtocol(protocol.Protocol):
         request = PgRequest("Q", query + "\0")
         return self.sendMessage(request)
 
+    def fn(self, fnid, format, *args):
+        """FunctionCall: execute a function.
+
+        format can be 0 (text) or 1(binary)
+        
+        arguments must be strings
+        
+        XXX TODO: in the current implementation all arguments (and the
+        return value) must be of the same format.
+        """
+        
+        prefix = pack("!IHHH", fnid, 1, format, len(args))
+
+        data = []
+        for a in args:
+            length = len(a)
+            buf = pack("!I%ds" % length, length, a)
+            data.append(buf)
+        
+        payload = prefix + ''.join(data) + pack("!H", format)
+        request = PgRequest("F", payload)
+
+        return self.sendMessage(request)
+        
     def finish(self):
         """Terminate: issue a disconnection packet and disconnect.
         """
