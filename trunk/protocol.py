@@ -17,9 +17,10 @@ from twisted.internet import protocol, defer
 
 
 # protocol version
-PG_VERSION_MAJOR = 3
-PG_VERSION_MINOR = 0
-PG_PROTO_VERSION = (PG_VERSION_MAJOR << 16) | PG_VERSION_MINOR 
+PG_PROTO_VERSION = (3 << 16) | 0
+
+# cancel request code
+PG_CANCEL_CODE = (1234 << 16) | 5678
 
 # connection status (XXX not realy useful here)
 CONNECTION_STARTED = 0 # waiting for connection to be made
@@ -63,7 +64,9 @@ class Error(Exception):
     pass
 
 class PgError(Error):
-    """XXX TODO
+    """A wrapper for a dictionary with POstgreSQL error data.
+    
+    XXX TODO
     """
     
     def __init__(self, args):
@@ -81,19 +84,40 @@ class AuthenticationError(Error):
 class UnsupportedError(Error):
     pass
 
-class PgResult(object):
-    """XXX TODO
-    """
 
 class PgCancel(object):
-    """XXX TODO
+    """A proxy object for sending cancel requests to a PostgreSQL
+    backend.
     """
+    
+    def __init__(self, addr, backendPID, cancelKey):
+        self.addr = addr
+        self.backendPID = backendPID
+        self.cancelKey = cancelKey
+
+    def cancel(self, timeout=30):
+        """Send a cancel request to the backend.
+        """
+        
+        from twisted.internet import reactor
+        
+        
+        factory = CancelFactory(self.backendPID, self.cancelKey)
+        reactor.connectTCP(self.addr.host, self.addr.port, factory, timeout)
+        
+        # returns only when the request has been sent
+        return factory.deferred
+
 
 class Notification(object):
+    """A wrapper for notify data.
+    """
+    
     def __init__(self, pid, name, extra=None):
         self.pid = pid
         self.name = name
         self.extra = extra
+
 
 class PgRequest(object):
     """A wrapper for a request to the backend.
@@ -104,6 +128,10 @@ class PgRequest(object):
         self.payload = payload
 
         self.deferred = defer.Deferred()
+
+class PgResult(object):
+    """XXX TODO
+    """
 
 
 class PgProtocol(protocol.Protocol):
@@ -540,6 +568,24 @@ class PgProtocol(protocol.Protocol):
 
         return self.sendMessage(request)
     
+    def getCancel(self):
+        """Request a cancellation object for this connection.
+        """
+
+        return PgCancel(self.addr, self.backendPID, self.cancelKey)
+
+    def cancel(self, backendPID, cancelKey):
+        """CancelRequest: request a cancellation for the current
+        query.
+
+        internal method
+        """
+
+        payload = pack("!IIII", 16, PG_CANCEL_CODE, backendPID, cancelKey)
+        
+        # the CancelRequest does not require the message type
+        self.transport.write(payload)
+
     def finish(self):
         """Terminate: issue a disconnection packet and disconnect.
         """
@@ -564,6 +610,24 @@ class PgFactory(protocol.ClientFactory):
     def clientConnectionMade(self, protocol):
         pass
 
+
+class CancelFactory(PgFactory):
+    """A custom factory for cancel requests.
+    """
+            
+    def __init__(self, backendPID, cancelKey):
+        self.backendPID = backendPID
+        self.cancelKey = cancelKey
+        
+        self.deferred = defer.Deferred()
+                
+    def clientConnectionMade(self, protocol):
+        protocol.cancel(self.backendPID, self.cancelKey)
+        protocol.finish() # XXX (the specification says nothing)
+
+    def clientConnectionLost(self, connector, reason):
+        self.deferred.callback(None)
+        
     def clientConnectionFailed(self, connector, reason):
-        pass
+        self.deferred.errback(reason)
 

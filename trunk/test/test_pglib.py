@@ -13,7 +13,7 @@ import sys
 sys.path.append("../")
 
 from twisted.python import log
-from twisted.internet import reactor, defer
+from twisted.internet import reactor, defer, error
 from twisted.trial import unittest
 
 import protocol
@@ -27,6 +27,9 @@ port = 5432
 # SELECT oid FROM pg_proc WHERE proname = 'echo';
 echoOid = 19196
 loopOid = 19197
+
+# error code for a cancelled request
+CANCEL_ERROR_CODE = 57014
 
 
 # utility function
@@ -61,7 +64,7 @@ class TestCaseCommon(unittest.TestCase):
     """Common methods for our Test Case
     """
     
-    timeout = 1
+    timeout = 5
     
     def setUp(self):
         def setup(protocol):
@@ -73,7 +76,7 @@ class TestCaseCommon(unittest.TestCase):
         return factory.deferred.addCallback(setup)
 
     def tearDown(self):
-        self.protocol.transport.loseConnection()
+        self.protocol.finish()
     
     
     def login(self):
@@ -245,3 +248,46 @@ class TestNotification(TestCaseCommon):
                              ).addCallback(cbQuery
                                            ).addCallback(cbNotify
                                                          )
+
+class TestCancel(TestCaseCommon):
+    def testCancelVoid(self):
+        def cbLogin(params):
+            cancelObj = self.protocol.getCancel()
+            return cancelObj.cancel()
+            
+                
+        d = self.login().addCallback(cbLogin)
+        return d
+
+    def _testCancelVoidFail(self):
+        # XXX TODO
+        def cbLogin(params):
+            cancelObj = self.protocol.getCancel()
+            # force a timeout error for the cancel connector
+            return cancelObj.cancel(0.01) # XXX the value is critical
+            
+                
+        d = self.login().addCallback(cbLogin)
+        return self.failUnlessFailure(d, error.TimeoutError)
+
+    def testCancel(self):
+        def cbLogin(params):
+            return self.protocol.fn(loopOid, 0)
+
+        def ebCall(reason):
+            code = int(reason.value.args["C"])
+            self.failUnlessEqual(code, CANCEL_ERROR_CODE)
+
+            return reason
+        
+        def cancel():
+            cancelObj = self.protocol.getCancel()
+            cancelObj.cancel().addCallback(lambda _: None)
+            
+                
+        d = self.login().addCallback(cbLogin
+                                     ).addErrback(ebCall
+                                                  )
+
+        reactor.callLater(2, cancel)
+        return self.failUnlessFailure(d, protocol.PgError)
