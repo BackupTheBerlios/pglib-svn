@@ -128,7 +128,7 @@ class PgProtocol(protocol.Protocol):
     lastResult = None
     lastNotice = {}
     lastError = {}
-    lastNotification = None
+    lastNotify = None
     
     protocolVersion = 3 # we support only this
     serverVersion = None # XXX
@@ -444,7 +444,7 @@ class PgProtocol(protocol.Protocol):
         name, extra, _ = data[4:].split("\0")
 
         # XXX save only the last notification
-        self.lastNotification = Notification(pid, name, extra)
+        self.lastNotify = Notification(pid, name, extra)
         
     # 
     # frontend messages handling

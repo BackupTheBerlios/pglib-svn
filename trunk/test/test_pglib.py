@@ -237,7 +237,7 @@ class TestNotification(TestCaseCommon):
 
 
         def cbNotify(result):
-            notification = self.protocol.lastNotification
+            notification = self.protocol.lastNotify
             self.failUnlessEqual(notification.name, "pglib")
         
         d = self.login()
