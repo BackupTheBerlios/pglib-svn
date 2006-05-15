@@ -12,8 +12,11 @@ Read LICENSE file for more informations.
 from struct import pack, unpack
 import md5
 
+from zope.interface import implements
 from twisted.python import log
 from twisted.internet import protocol, defer
+
+import ipg
 
 
 # protocol version
@@ -23,40 +26,27 @@ PG_PROTO_VERSION = (3 << 16) | 0
 PG_CANCEL_CODE = (1234 << 16) | 5678
 
 # connection status (XXX not realy useful here)
-CONNECTION_STARTED = 0 # waiting for connection to be made
-CONNECTION_MADE = 1 # connection ok; waiting to send
+CONNECTION_STARTED = 0           # waiting for connection to be made
+CONNECTION_MADE = 1              # connection ok; waiting to send
 CONNECTION_AWAITING_RESPONSE = 2 # waiting for a response from the
                                  # server # XXX what response?
-CONNECTION_AUTH_OK = 3 # received authetication; waitig for backend
-                       # start-up finish
-CONNECTION_SSL_STARTUP = 4 # negotiating SS encryption
-CONNECTION_SETENV = 5 # negotiating enviroment-driven parameter
-                      # settings # XXX what is this?
-CONNECTION_OK = 6 # connection ok; backend ready
-CONNECTION_BAD = None # connection procedure failed
+CONNECTION_AUTH_OK = 3           # received authetication; waitig for backend
+                                 # start-up finish
+CONNECTION_SSL_STARTUP = 4       # negotiating SSL encryption
+CONNECTION_SETENV = 5            # negotiating enviroment-driven
+                                 # parameter # settings # XXX what is this?
+CONNECTION_OK = 6                # connection ok; backend ready
+CONNECTION_BAD = None            # connection procedure failed
 
 # transaction status
-PGTRANS_IDLE = "I" # currently idle
-PGTRANS_INTRANS = "T" # idle, in a valid transaction block
-PGTRANS_INERROR = "E" # idle, in a failed transaction block
-PGTRANS_ACTIVE = "A" # a command is in progress (use only in the frontend)
+PGTRANS_IDLE = "I"     # currently idle
+PGTRANS_INTRANS = "T"  # idle, in a valid transaction block
+PGTRANS_INERROR = "E"  # idle, in a failed transaction block
+PGTRANS_ACTIVE = "A"   # a command is in progress (used only in the frontend)
 PGTRANS_UNKNOWN = None # the connection is bad # XXX
 
 PG_HEADER_SIZE = 5 # 1 byte opcode + 4 byte lenght
 
-
-
-class PgConnectionOption(object):
-    """Class for storing connection options.
-
-    XXX TODO (move to fe.py)
-    """
-
-    def __init__(self, **kwargs):
-        self.keywords = kwargs
-        self.envvars = {}
-        self.compiled = {}
-        self.options = {}
 
 
 # exception class hierarchy
@@ -64,7 +54,7 @@ class Error(Exception):
     pass
 
 class PgError(Error):
-    """A wrapper for a dictionary with POstgreSQL error data.
+    """A wrapper for a dictionary with PostgreSQL error data.
     
     XXX TODO
     """
@@ -118,6 +108,9 @@ class Notification(object):
         self.name = name
         self.extra = extra
 
+    def __str__(self):
+        return "'%s' notification received " \
+            "from backend pid %d" % (self.name, self.pid)
 
 class PgRequest(object):
     """A wrapper for a request to the backend.
@@ -128,6 +121,7 @@ class PgRequest(object):
         self.payload = payload
 
         self.deferred = defer.Deferred()
+
 
 class PgResult(object):
     """XXX TODO
@@ -142,11 +136,14 @@ class PgProtocol(protocol.Protocol):
 
     We also choose to not support multiple result set (for simple
     query with multiple commands), but you can retrieve all the result
-    by suppling your own RowConsumer.
+    by suppling your own IRowConsumer implementation.
 
     Whenever possible, we try to follow the interface of libpq.
     """
 
+    implements(ipg.IFastPath)
+
+    
     _buffer = ""
 
     status = CONNECTION_STARTED
@@ -159,34 +156,42 @@ class PgProtocol(protocol.Protocol):
     lastNotify = None
     
     protocolVersion = 3 # we support only this
-    serverVersion = None # XXX
+    serverVersion = None
     backendPID = None
 
     
-    def __init__(self, addr):
+    def __init__(self, addr, handler=None, rowConsumer=None):
+        """Address is a IAddr address, handler is a IHandler object,
+        rowConsumer is a IRowConsumer object.
+        """
+        
         self.addr = addr # used by cancel
+        self.handler = handler or DefaultHandler()
+        self.rowConsumer = rowConsumer or DefaultRowConsumer()
         
         # cancellation key used for cancel a query in progress
         self.cancelKey = None
         
-        self._queue = [] # we queue requests to backend
+        self._queue = [] # we queue requests to the backend
         self._last = None # last request we made
 
     def connectionMade(self):
         self.status = CONNECTION_MADE
-
+        self.transactionStatus = PGTRANS_UNKNOWN
+        
         self.factory.clientConnectionMade(self)
 
     def connectionLost(self, reason=protocol.connectionDone):
         #log.msg("connection lost", reason)
         
+        # XXX there is really no need for these...
         self.status = CONNECTION_BAD
         self.transactionStatus = PGTRANS_UNKNOWN
     
     def dataReceived(self, data):
         """Handle raw data arrived from postgres backend.
 
-        XXX TODO use cStringIO as in pgasync, but DO tests.
+        XXX TODO use cStringIO as in pgasync, but do some benchmarks.
         """
 
         self._buffer = self._buffer + data
@@ -217,7 +222,6 @@ class PgProtocol(protocol.Protocol):
 
     def _flush(self):
         # send the next queued request
-
         if self._queue:
             request = self._queue.pop(0)
             
@@ -281,7 +285,6 @@ class PgProtocol(protocol.Protocol):
         
         # check if we failed the authentication
         if self._last.opcode is None:
-            self.status = CONNECTION_BAD
             self._last.deferred.errback(PgError(error))
             self.transport.loseConnection()
         
@@ -296,9 +299,10 @@ class PgProtocol(protocol.Protocol):
             key, val = item[:1], item[1:]
             notice[key] = val
 
-        self.lastNotice = notice
+        self.handler.notice(notice)
         
-        log.msg("Notice:", str(notice))
+        # XXX we store only the last notice
+        self.lastNotice = notice
         
     def message_R(self, data):
         """Authentication: authentication request.
@@ -371,7 +375,7 @@ class PgProtocol(protocol.Protocol):
         self.backendPID, self.cancelKey = unpack("!II", data)
 
     def message_S(self, data):
-        """ParameterStatus: backed runtime parameter.
+        """ParameterStatus: backend runtime parameter.
         """
 
         key, val, _ = data.split("\0")
@@ -385,6 +389,7 @@ class PgProtocol(protocol.Protocol):
 
         assert self._last
         deferred = self._last.deferred
+        opcode = self._last.opcode
         self._last = None
         
         if self.lastError:
@@ -392,10 +397,9 @@ class PgProtocol(protocol.Protocol):
             self.lastError = {}
             return
         
-        oldStatus = self.status
         self.status = CONNECTION_OK
         
-        if oldStatus == CONNECTION_AUTH_OK:
+        if opcode is None: 
             # compute the server version, as required by the libpq
             # interface
             version = self.parameterStatus["server_version"]
@@ -418,25 +422,25 @@ class PgProtocol(protocol.Protocol):
         Note that a simple query can contain more than one command.
         """
 
-        print "command complete", tag
+        self.lastResult = self.rowConsumer.complete(tag)
 
     def message_T(self, data):
         """RowDescription: a description of row fields.
         """
 
-        print "row description:", repr(data)
+        self.rowConsumer.description(data)
 
     def message_D(self, data):
         """DataRow: a row from the result.
         """
 
-        print "data row:", repr(data)
+        self.rowConsumer.row(data)
 
     def message_I(self, data):
         """EmptyQueryResponse: an empty query string was recognized.
         """
 
-        print "empty query"
+        self.lastResult = "empty query"
         
     
     #
@@ -471,29 +475,24 @@ class PgProtocol(protocol.Protocol):
         (pid,) = unpack("!I", data[:4])
         name, extra, _ = data[4:].split("\0")
 
-        # XXX save only the last notification
-        self.lastNotify = Notification(pid, name, extra)
+        notify = Notification(pid, name, extra)
+        self.handler.notify(notify)
         
+        # XXX store only the last notification
+        self.lastNotify = notify
+    
+    
     # 
     # frontend messages handling
     #
-    def login(self, sslmode="prefer", **kwargs):
+    def login(self, **kwargs):
         """StartupMessage: login to the PostgreSQL database
-
-        sslmode can be:
-          disable
-          allow
-          prefer
-          require
         
         The only required option is user.
         Optional parameters is database.
 
         In addition any run-time parameters that can be set at backend
         start time may be listed.
-
-        XXX TODO: support default values, enviroment variables and
-        password files.
         """
 
         parameters = kwargs.copy()
@@ -544,18 +543,18 @@ class PgProtocol(protocol.Protocol):
         request = PgRequest("Q", query + "\0")
         return self.sendMessage(request)
 
-    def fn(self, fnid, format, *args):
+    def fn(self, fnid, fformat, *args):
         """FunctionCall: execute a function.
 
-        format can be 0 (text) or 1(binary)
+        fformat can be 0 (text) or 1(binary)
         
         arguments must be strings
         
-        XXX TODO: in the current implementation all arguments (and the
-        return value) must be of the same format.
+        XXX TODO: since I'm lazy, in the current implementation all
+        arguments (and the return value) must be of the same format.
         """
         
-        prefix = pack("!IHHH", fnid, 1, format, len(args))
+        prefix = pack("!IHHH", fnid, 1, fformat, len(args))
 
         data = []
         for a in args:
@@ -563,7 +562,7 @@ class PgProtocol(protocol.Protocol):
             buf = pack("!I%ds" % length, length, a)
             data.append(buf)
         
-        payload = prefix + ''.join(data) + pack("!H", format)
+        payload = prefix + ''.join(data) + pack("!H", fformat)
         request = PgRequest("F", payload)
 
         return self.sendMessage(request)
@@ -601,6 +600,16 @@ class PgFactory(protocol.ClientFactory):
     """A simple factory that manages PgProtocol.
     """
     
+    def __init__(self, sslmode="prefer"):
+        """sslmode can be:
+          disable
+          allow
+          prefer
+          require
+        """
+        
+        # we store sslmode here because it is used by cancel too.
+        self.sslmode = sslmode
 
     def buildProtocol(self, addr):
         protocol = PgProtocol(addr)
@@ -615,9 +624,10 @@ class CancelFactory(PgFactory):
     """A custom factory for cancel requests.
     """
             
-    def __init__(self, backendPID, cancelKey):
+    def __init__(self, backendPID, cancelKey, sslmode="prefer"):
         self.backendPID = backendPID
         self.cancelKey = cancelKey
+        self.sslmode = sslmode
         
         self.deferred = defer.Deferred()
                 
@@ -631,3 +641,34 @@ class CancelFactory(PgFactory):
     def clientConnectionFailed(self, connector, reason):
         self.deferred.errback(reason)
 
+
+#
+# Default implementations for ipg interfaces
+#
+
+class DefaultHandler(object):
+    implements(ipg.IHandler)
+
+    def notice(self, notice):
+        log.msg("Notice:", str(notice))
+
+    def notify(self, notify):
+        log.msg("Notification:", str(notify))
+
+        
+class DefaultRowConsumer(object):
+    implements(ipg.IRowConsumer)
+    
+    def __init__(self):
+        pass
+
+    def description(self, data):
+        print "description", repr(data)
+
+    def row(self, data):
+        print "row", repr(data)
+
+    def complete(self, data):
+        print "command complete", data
+
+        return None

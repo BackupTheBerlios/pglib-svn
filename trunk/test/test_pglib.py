@@ -25,6 +25,7 @@ port = 5432
 
 # test functions oids (you have to know this) # XXX
 # SELECT oid FROM pg_proc WHERE proname = 'echo';
+# XXX TODO retrieve these with a query
 echoOid = 19196
 loopOid = 19197
 
@@ -84,6 +85,10 @@ class TestCaseCommon(unittest.TestCase):
             user="pglib_md5", password="test", database="pglib"
             )
     
+    # XXX TODO
+    def getFnOid(self):
+        pass
+
 
 class TestLogin(TestCaseCommon):
     def testTrust(self):
@@ -209,6 +214,21 @@ class TestSimpleQuery(TestCaseCommon):
             d.addCallback(query, i)
 
         return d
+
+    def testEmptyQuery(self):
+        def cbLogin(params):
+            return self.protocol.execute("")
+            
+        def cbQuery(result):
+            self.failUnlessEqual(self.protocol.status,
+                                 protocol.CONNECTION_OK)
+
+            self.failUnlessEqual(result, "empty query")
+        
+        d = self.login()
+        return d.addCallback(cbLogin
+                             ).addCallback(cbQuery
+                                           )
 
 
 class TestFunctionCall(TestCaseCommon):
