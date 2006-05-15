@@ -25,6 +25,9 @@ PG_PROTO_VERSION = (3 << 16) | 0
 # cancel request code
 PG_CANCEL_CODE = (1234 << 16) | 5678
 
+# messages header size
+PG_HEADER_SIZE = 5 # 1 byte opcode + 4 byte lenght
+
 # connection status (XXX not realy useful here)
 CONNECTION_STARTED = 0           # waiting for connection to be made
 CONNECTION_MADE = 1              # connection ok; waiting to send
@@ -45,8 +48,33 @@ PGTRANS_INERROR = "E"  # idle, in a failed transaction block
 PGTRANS_ACTIVE = "A"   # a command is in progress (used only in the frontend)
 PGTRANS_UNKNOWN = None # the connection is bad # XXX
 
-PG_HEADER_SIZE = 5 # 1 byte opcode + 4 byte lenght
+# error field codes
+PG_DIAG_SEVERITY = "S"
+PG_DIAG_SQLSTATE = "C"
+PG_DIAG_MESSAGE_PRIMARY = "M"
+PG_DIAG_MESSAGE_DETAIL = "D"
+PG_DIAG_MESSAGE_HINT = "H"
+PG_DIAG_STATEMENT_POSITION = "P"
+PG_DIAG_INTERNAL_POSITION = "p"
+PG_DIAG_INTERNAL_QUERY = "q"
+PG_DIAG_CONTEXT = "W"
+PG_DIAG_SOURCE_FILE = "F"
+PG_DIAG_SOURCE_LINE = "L"
+PG_DIAG_SOURCE_FUNCTION = "R"
 
+# result status
+PGRES_EMPTY_QUERY = 0      # the string sent to the server was empty
+PGRES_COMMAND_OK = 1       # successful completion of a command
+                           # returning no data
+PGRES_TUPLES_OK = 2        # successful completion of a command
+                           # returning data (such as SELECT or SHOW)
+PGRES_COPY_OUT = 3         # Copy Out (from server) data transfer started
+PGRES_COPY_IN = 4          # Copy In (to server) data transfer started
+# XXX there are not realy useful
+PGRES_BAD_RESPONSE = -1    # the server response wa not understood
+PGRES_NONFATAL_ERROR = -2  # a non fatal error (a notice or warning)
+                           # occurred
+PGRES_FATAL_ERROR = -3     # a fatal error occurred
 
 
 # exception class hierarchy
@@ -62,6 +90,19 @@ class PgError(Error):
     def __init__(self, args):
         self.args = args
 
+    def errorMessage(self):
+        """Return the error message associated with this instance.
+        """
+
+        return self.args["M"]
+
+    def errorField(self, field):
+        """Returns an individual field of an error report, or None if
+        the specified fiels is not included.
+        """
+
+        return self.args.get(field, None)
+    
     def __str__(self):
         return str(self.args)
 
@@ -594,6 +635,15 @@ class PgProtocol(protocol.Protocol):
         
         self.transport.loseConnection()
 	
+    def errorMessage(self):
+        """Return the error message associated with th3 last command,
+        or an empty string if there was no error.
+        """
+
+        if self.lastError:
+            return self.lastError["M"]
+        else:
+            return ""
 
 
 class PgFactory(protocol.ClientFactory):

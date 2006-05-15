@@ -88,13 +88,37 @@ class IRowDescription(Interface):
     """A row description.
     """
 
-    # XXX TODO
+    ntuples = Attribute(
+        "The number of rows (tuples) in the query result"
+        )
+    nfields = Attribute(
+        "The number of columns (fields) in each row in the" \
+        "query result"
+        )
+    fnames = Attribute("Columns name (a list)")
+#    fnumber = Attribute("
+#    ftable = Attribute("the OID of the table from witch
+#    ftablecol
+#    fformat
+#    ftype
+#    fmod
+#    fsize
+#    binaryTuples
 
+    
 class IPgResult(Interface):
     """The result of a query.
     """
 
-    # XXX TODO
+    description = Attribute("An object implementing IRowDescription")
+    status = Attribute("The result status of the command")
+    
+    rows = Attribute(
+        """A list of list, containig the rows.
+        The implementation can choose to return raw strings, or Python
+        objects
+        """
+        )
 
 
 #
