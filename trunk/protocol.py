@@ -14,7 +14,7 @@ import md5
 
 from zope.interface import implements
 from twisted.python import log
-from twisted.internet import protocol, defer
+from twisted.internet import protocol, defer, interfaces
 
 import ipg
 
@@ -24,6 +24,9 @@ PG_PROTO_VERSION = (3 << 16) | 0
 
 # cancel request code
 PG_CANCEL_CODE = (1234 << 16) | 5678
+
+# SSL request code
+SSL_REQUEST_CODE = (1234 << 16) | 5679
 
 # messages header size
 PG_HEADER_SIZE = 5 # 1 byte opcode + 4 byte lenght
@@ -207,8 +210,8 @@ class PgProtocol(protocol.Protocol):
         """
         
         self.addr = addr # used by cancel
-        self.handler = handler or DefaultHandler()
-        self.rowConsumer = rowConsumer or DefaultRowConsumer()
+        self.handler = handler or Handler()
+        self.rowConsumer = rowConsumer or RowConsumer()
         
         # cancellation key used for cancel a query in progress
         self.cancelKey = None
@@ -216,12 +219,46 @@ class PgProtocol(protocol.Protocol):
         self._queue = [] # we queue requests to the backend
         self._last = None # last request we made
 
+    def _getContextFactory(self):
+        context = getattr(self.factory, "context", None)
+        if context is not None:
+            return self.context
+        
+        try:
+            from twisted.internet import ssl
+        except ImportError:
+            return None
+        else:
+            context = ssl.ClientContextFactory()
+            context.method = ssl.SSL.TLSv1_METHOD
+            return context
+
     def connectionMade(self):
         self.status = CONNECTION_MADE
         self.transactionStatus = PGTRANS_UNKNOWN
         
-        self.factory.clientConnectionMade(self)
+        # Unfortunately the response to a SSL request is not a
+        # standard message: there is not lenght.
+        # So we use two version of dataReceived method
 
+        # XXX BUG hostssl and hostnossl seems to be ignored...
+        if self.factory.sslmode in ["disable", "allow"]:
+            # no SSL negotiation
+            self.dataReceived = self._dataReceived
+            self.factory.clientConnectionMade(self)
+        else: # prefer, require
+            # prepare to negotiate SSL
+            self.dataReceived = self._dataReceivedSSL
+            
+            # the SSLRequest has no type code
+            self.transport.write(pack("!II", 8, SSL_REQUEST_CODE))
+            self.status = CONNECTION_SSL_STARTUP
+
+            log.msg("started SSL request")
+            
+            # we call clientConnectionMade only after negotiation
+            # has been completed
+        
     def connectionLost(self, reason=protocol.connectionDone):
         #log.msg("connection lost", reason)
         
@@ -229,7 +266,7 @@ class PgProtocol(protocol.Protocol):
         self.status = CONNECTION_BAD
         self.transactionStatus = PGTRANS_UNKNOWN
     
-    def dataReceived(self, data):
+    def _dataReceived(self, data):
         """Handle raw data arrived from postgres backend.
 
         XXX TODO use cStringIO as in pgasync, but do some benchmarks.
@@ -251,7 +288,62 @@ class PgProtocol(protocol.Protocol):
 
             self.messageReceived(opcode, payload)
 
+    def _dataReceivedSSL(self, data):
+        """Handle backend response to our request of use SSL.
+        """
 
+        log.msg("SSL Response:", data)
+        
+        if data == "S":
+            # check the support for SSL
+            tls = self.transport #interfaces.ITLSTransport(self.transport, None)
+            if tls is None:
+                err = RuntimeError(
+                    "PgProtocol transport does not implements " \
+                    "ITLSTRansport"
+                    )
+                log.err(err)
+                self.transport.loseConnection()
+                
+                return
+
+            context = self._getContextFactory()
+            if context is None:
+                err = RuntimeError(
+                    "PgProtocol requires a TLS context to "
+                    "initiate the SSL handshake"
+                    )
+                log.err(err)
+                self.transport.loseConnection()
+                
+                return
+
+            # ok, we can initialize SSL handshake
+            tls.startTLS(context)
+            self.dataReceived = self._dataReceived
+
+            # handshake complete(?), now we can notify the factory
+            log.msg("SSL handshake complete")
+            self.factory.clientConnectionMade(self)
+            
+            return
+        elif data == "N":
+            if self.factory.sslmode == "required":
+                err = RuntimeError(
+                    "PostgreSQL backend does not support SSL, " \
+                    "connection aborted"
+                    )
+                log.err(err)
+                self.transport.loseConnection()
+                
+                return
+
+            # no SSL available
+            log.msg("no SSL available")
+            self.dataReceived = self._dataReceived
+
+    # XXX TODO test all possible cases
+            
     def sendMessage(self, request):
         """Send the given message to the backend.
         """
@@ -696,7 +788,7 @@ class CancelFactory(PgFactory):
 # Default implementations for ipg interfaces
 #
 
-class DefaultHandler(object):
+class Handler(object):
     implements(ipg.IHandler)
 
     def notice(self, notice):
@@ -706,7 +798,7 @@ class DefaultHandler(object):
         log.msg("Notification:", str(notify))
 
         
-class DefaultRowConsumer(object):
+class RowConsumer(object):
     implements(ipg.IRowConsumer)
     
     def __init__(self):

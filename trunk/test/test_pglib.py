@@ -48,9 +48,10 @@ def waitFor(secs):
 
 
 class TestFactory(protocol.PgFactory):
-    def __init__(self):
+    def __init__(self, sslmode="prefer"):
         self.deferred = defer.Deferred()
-
+        protocol.PgFactory.__init__(self, sslmode)
+    
     def clientConnectionMade(self, protocol):
         self.deferred.callback(protocol)
         
@@ -311,3 +312,24 @@ class TestCancel(TestCaseCommon):
 
         reactor.callLater(2, cancel)
         return self.failUnlessFailure(d, protocol.PgError)
+
+
+class TestSSL(TestCaseCommon):
+    def setUp(self):
+        def setup(protocol):
+            self.protocol = protocol
+    
+        factory = TestFactory("disable")
+        self.connector = reactor.connectTCP(host, port, factory)
+        
+        return factory.deferred.addCallback(setup)
+
+    def testClearText(self):
+        def callback(params):
+            self.failUnless(isinstance(params, dict))
+        
+        d = self.protocol.login(
+            user="pglib_ssl", password="test", database="pglib"
+            )
+        
+        return d.addCallback(callback)
