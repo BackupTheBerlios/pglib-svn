@@ -31,6 +31,8 @@ SSL_REQUEST_CODE = (1234 << 16) | 5679
 # messages header size
 PG_HEADER_SIZE = 5 # 1 byte opcode + 4 byte lenght
 
+InvalidOid = 0 # XXX
+
 # connection status (XXX not realy useful here)
 CONNECTION_STARTED = 0           # waiting for connection to be made
 CONNECTION_MADE = 1              # connection ok; waiting to send
@@ -347,11 +349,13 @@ class PgProtocol(protocol.Protocol):
                 self.transport.loseConnection()
                 
                 return
-
-            # no SSL available
-            log.msg("no SSL available")
+            
             self.dataReceived = self._dataReceived
-
+            
+            # no SSL available, now we can notify the factory
+            log.msg("no SSL available")
+            self.factory.clientConnectionMade(self)
+            
     def sendMessage(self, request):
         """Send the given message to the backend.
         """
@@ -563,12 +567,29 @@ class PgProtocol(protocol.Protocol):
         Note that a simple query can contain more than one command.
         """
 
-        self.lastResult = self.rowConsumer.complete(tag)
+        # parse the tag
+        tags = tag.split(" ")
+        n = len(tags)
+        
+        cmdStatus = tags[0]
+        if n == 3:
+            oid  = int(tags[1])
+            rows = tags[2] # XXX
+        elif n == 2:
+            oid = None
+            rows = tags[1]
+        else:
+            oid = None
+            rows = 0
+        
+        self.lastResult = self.rowConsumer.complete(cmdStatus, oid,
+                                                    rows)
 
     def message_T(self, data):
         """RowDescription: a description of row fields.
         """
 
+        # XXX should we parse data here?
         self.rowConsumer.description(data)
 
     def message_D(self, data):
@@ -818,7 +839,7 @@ class RowConsumer(object):
     def row(self, data):
         print "row", repr(data)
 
-    def complete(self, data):
-        print "command complete", data
+    def complete(self, cmdStatus, oid, rows):
+        print "command complete", cmdStatus, oid, rows
 
         return None

@@ -19,3 +19,23 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+
+-- some table
+CREATE TABLE TestRW (
+       x INTEGER,
+       s TEXT
+);
+
+CREATE TABLE TestR (
+       x INTEGER,
+       s TEXT
+);
+
+
+INSERT INTO TestR VALUES (1, 'A');
+INSERT INTO TestR Values (2, 'B');
+
+
+-- privileges setup
+GRANT ALL PRIVILEGES ON TestR TO PUBLIC;
+GRANT ALL PRIVILEGES ON TestRW TO PUBLIC;

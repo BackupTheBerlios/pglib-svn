@@ -23,14 +23,16 @@ import protocol
 host = "localhost"
 port = 5432
 
+SSL = False # set to False if SSL not enabled on PostgreSQL
+
 # test functions oids (you have to know this) # XXX
 # SELECT oid FROM pg_proc WHERE proname = 'echo';
 # XXX TODO retrieve these with a query
-echoOid = 19196
-loopOid = 19197
+echoOid = 19213
+loopOid = 19214
 
 # error code for a cancelled request
-CANCEL_ERROR_CODE = 57014
+CANCEL_ERROR_CODE = "57014"
 
 
 # utility function
@@ -234,6 +236,54 @@ class TestSimpleQuery(TestCaseCommon):
                              ).addCallback(cbQuery
                                            )
 
+    def testSelect(self):
+        def cbLogin(params):
+            return self.protocol.execute("""
+            SELECT x, s FROM TestR ORDER BY x
+            """)
+            
+        def cbQuery(result):
+            self.failUnlessEqual(self.protocol.status,
+                                 protocol.CONNECTION_OK)
+
+        d = self.login()
+        return d.addCallback(cbLogin
+                             ).addCallback(cbQuery
+                                           )
+
+    def testInsert(self):
+        def cbLogin(params):
+            # XXX TODO these values must be removed...
+            return self.protocol.execute("""
+            INSERT INTO TestRW VALUES (10, 'Z')
+            """)
+            
+        def cbQuery(result):
+            self.failUnlessEqual(self.protocol.status,
+                                 protocol.CONNECTION_OK)
+
+        d = self.login()
+        return d.addCallback(cbLogin
+                             ).addCallback(cbQuery
+                                           )
+
+    def testUpdate(self):
+        def cbLogin(params):
+            # XXX TODO (new != old)
+            return self.protocol.execute("""
+            UPDATE TestRW SET s = 'B' WHERE x = 2
+            """)
+            
+        def cbQuery(result):
+            self.failUnlessEqual(self.protocol.status,
+                                 protocol.CONNECTION_OK)
+
+        d = self.login()
+        return d.addCallback(cbLogin
+                             ).addCallback(cbQuery
+                                           )
+    
+    
 
 class TestFunctionCall(TestCaseCommon):
     def testFunction(self):
@@ -299,7 +349,7 @@ class TestCancel(TestCaseCommon):
             return self.protocol.fn(loopOid, 0)
 
         def ebCall(reason):
-            code = int(reason.value.args["C"])
+            code = reason.value.args["C"]
             self.failUnlessEqual(code, CANCEL_ERROR_CODE)
 
             return reason
@@ -317,44 +367,46 @@ class TestCancel(TestCaseCommon):
         return self.failUnlessFailure(d, protocol.PgError)
 
 
+# XXX This test will fail if SSL is not enabled in PostgreSQL.
 class TestSSL(TestCaseCommon):
     # XXX sslmode "prefer" and "allow" cannot be tested
     def setUp(self):
         pass
 
-    def testSSLRequire(self):
-        def cbConnect(result):
-            return self.protocol.login(
-                user="pglib_ssl", password="test", database="pglib"
-                )
+    if SSL:
+        def testSSLRequire(self):
+            def cbConnect(result):
+                return self.protocol.login(
+                    user="pglib_ssl", password="test", database="pglib"
+                    )
         
-        def cbLogin(params):
-            self.failUnless(isinstance(params, dict))
+            def cbLogin(params):
+                self.failUnless(isinstance(params, dict))
         
 
-        d = self.connect("enable")
-        return d.addCallback(cbConnect
-                             ).addCallback(cbLogin
-                                           )
+            d = self.connect("enable")
+            return d.addCallback(cbConnect
+                                 ).addCallback(cbLogin
+                                               )
 
-    def testSSLRequireFail(self):
-        def cbConnect(result):
-            return self.protocol.login(
-                user="pglib_nossl", password="test", database="pglib"
-                )
+        def testSSLRequireFail(self):
+            def cbConnect(result):
+                return self.protocol.login(
+                    user="pglib_nossl", password="test", database="pglib"
+                    )
         
-        def ebLogin(reason):
-            code = int(reason.value.args["C"])
-            self.failUnlessEqual(code, 28000)
+            def ebLogin(reason):
+                code = reason.value.args["C"]
+                self.failUnlessEqual(code, "28000")
+                
+                return reason
         
-            return reason
-        
-        d = self.connect("enable")
-        d.addCallback(cbConnect
-                      ).addCallback(ebLogin
-                                    )
-
-        return self.failUnlessFailure(d, protocol.PgError)
+            d = self.connect("enable")
+            d.addCallback(cbConnect
+                          ).addErrback(ebLogin
+                                       )
+            
+            return self.failUnlessFailure(d, protocol.PgError)
 
     def testSSLDisable(self):
         def cbConnect(result):
@@ -378,14 +430,14 @@ class TestSSL(TestCaseCommon):
                 )
         
         def ebLogin(reason):
-            code = int(reason.value.args["C"])
-            self.failUnlessEqual(code, 28000)
+            code = reason.value.args["C"]
+            self.failUnlessEqual(code, "28000")
         
             return reason
         
         d = self.connect("disable")
         d.addCallback(cbConnect
-                      ).addCallback(ebLogin
-                                    )
+                      ).addErrback(ebLogin
+                                   )
         
         return self.failUnlessFailure(d, protocol.PgError)
