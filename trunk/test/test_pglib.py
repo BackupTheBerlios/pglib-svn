@@ -69,25 +69,28 @@ class TestCaseCommon(unittest.TestCase):
     timeout = 5
     
     def setUp(self):
-        def setup(protocol):
-            self.protocol = protocol
+        return self.connect()
     
-        factory = TestFactory()
-        self.connector = reactor.connectTCP(host, port, factory)
-        
-        return factory.deferred.addCallback(setup)
-
     def tearDown(self):
         self.protocol.finish()
     
     
+    def connect(self, sslmode="prefer"):
+        def setup(protocol):
+            self.protocol = protocol
+    
+        factory = TestFactory(sslmode)
+        self.connector = reactor.connectTCP(host, port, factory)
+        
+        return factory.deferred.addCallback(setup)
+
     def login(self):
         return self.protocol.login(
             user="pglib_md5", password="test", database="pglib"
             )
     
-    # XXX TODO
     def getFnOid(self):
+        # XXX TODO
         pass
 
 
@@ -315,21 +318,74 @@ class TestCancel(TestCaseCommon):
 
 
 class TestSSL(TestCaseCommon):
+    # XXX sslmode "prefer" and "allow" cannot be tested
     def setUp(self):
-        def setup(protocol):
-            self.protocol = protocol
-    
-        factory = TestFactory("disable")
-        self.connector = reactor.connectTCP(host, port, factory)
-        
-        return factory.deferred.addCallback(setup)
+        pass
 
-    def testClearText(self):
-        def callback(params):
+    def testSSLRequire(self):
+        def cbConnect(result):
+            return self.protocol.login(
+                user="pglib_ssl", password="test", database="pglib"
+                )
+        
+        def cbLogin(params):
             self.failUnless(isinstance(params, dict))
         
-        d = self.protocol.login(
-            user="pglib_ssl", password="test", database="pglib"
-            )
+
+        d = self.connect("enable")
+        return d.addCallback(cbConnect
+                             ).addCallback(cbLogin
+                                           )
+
+    def testSSLRequireFail(self):
+        def cbConnect(result):
+            return self.protocol.login(
+                user="pglib_nossl", password="test", database="pglib"
+                )
         
-        return d.addCallback(callback)
+        def ebLogin(reason):
+            code = int(reason.value.args["C"])
+            self.failUnlessEqual(code, 28000)
+        
+            return reason
+        
+        d = self.connect("enable")
+        d.addCallback(cbConnect
+                      ).addCallback(ebLogin
+                                    )
+
+        return self.failUnlessFailure(d, protocol.PgError)
+
+    def testSSLDisable(self):
+        def cbConnect(result):
+            return self.protocol.login(
+                user="pglib_nossl", password="test", database="pglib"
+                )
+        
+        def cbLogin(params):
+            self.failUnless(isinstance(params, dict))
+        
+
+        d = self.connect("disable")
+        return d.addCallback(cbConnect
+                             ).addCallback(cbLogin
+                                           )
+
+    def testSSLDisableFail(self):
+        def cbConnect(result):
+            return self.protocol.login(
+                user="pglib_ssl", password="test", database="pglib"
+                )
+        
+        def ebLogin(reason):
+            code = int(reason.value.args["C"])
+            self.failUnlessEqual(code, 28000)
+        
+            return reason
+        
+        d = self.connect("disable")
+        d.addCallback(cbConnect
+                      ).addCallback(ebLogin
+                                    )
+        
+        return self.failUnlessFailure(d, protocol.PgError)

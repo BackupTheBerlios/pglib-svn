@@ -73,7 +73,7 @@ PGRES_TUPLES_OK = 2        # successful completion of a command
                            # returning data (such as SELECT or SHOW)
 PGRES_COPY_OUT = 3         # Copy Out (from server) data transfer started
 PGRES_COPY_IN = 4          # Copy In (to server) data transfer started
-# XXX there are not realy useful
+# XXX these are not realy useful
 PGRES_BAD_RESPONSE = -1    # the server response wa not understood
 PGRES_NONFATAL_ERROR = -2  # a non fatal error (a notice or warning)
                            # occurred
@@ -183,6 +183,9 @@ class PgProtocol(protocol.Protocol):
     by suppling your own IRowConsumer implementation.
 
     Whenever possible, we try to follow the interface of libpq.
+    
+    To simplify the interface, all columns or routines pararameters
+    must be of the same format: text or binary.
     """
 
     implements(ipg.IFastPath)
@@ -241,7 +244,14 @@ class PgProtocol(protocol.Protocol):
         # standard message: there is not lenght.
         # So we use two version of dataReceived method
 
-        # XXX BUG hostssl and hostnossl seems to be ignored...
+        # XXX "allow" and "prefer" are not fully supported.
+        # In fact if the server explicitly require or disable SSL
+        # (with hostssl and hostnossl in pg_hba.conf) there can be the
+        # need of a reconnection, and this is possible only in an
+        # higher level interface (see fe.py).
+        #
+        # However prefer is still useful, since it allows to connect
+        # to both SSL enabled or disabled servers.
         if self.factory.sslmode in ["disable", "allow"]:
             # no SSL negotiation
             self.dataReceived = self._dataReceived
@@ -342,8 +352,6 @@ class PgProtocol(protocol.Protocol):
             log.msg("no SSL available")
             self.dataReceived = self._dataReceived
 
-    # XXX TODO test all possible cases
-            
     def sendMessage(self, request):
         """Send the given message to the backend.
         """
