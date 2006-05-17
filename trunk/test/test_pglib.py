@@ -23,7 +23,7 @@ import protocol
 host = "localhost"
 port = 5432
 
-SSL = False # set to False if SSL not enabled on PostgreSQL
+SSL = True # set to False if SSL not enabled on PostgreSQL
 
 # test functions oids (you have to know this) # XXX
 # SELECT oid FROM pg_proc WHERE proname = 'echo';
@@ -52,12 +52,17 @@ def waitFor(secs):
 class TestFactory(protocol.PgFactory):
     def __init__(self, sslmode="prefer"):
         self.deferred = defer.Deferred()
+        self.closeDeferred = defer.Deferred()
+        
         protocol.PgFactory.__init__(self, sslmode)
     
     def clientConnectionMade(self, protocol):
         self.deferred.callback(protocol)
         
     def clientConnectionLost(self, connector, reason):
+        # connection close can require some time (as with TSL)
+        self.closeDeferred.callback(None)
+        
         log.msg("Lost connection.  Reason:", reason)
         
     def clientConnectionFailed(self, connector, reason):
@@ -75,13 +80,16 @@ class TestCaseCommon(unittest.TestCase):
     
     def tearDown(self):
         self.protocol.finish()
-    
+        
+        # make sure to wait for connection close
+        return self.closeDeferred
     
     def connect(self, sslmode="prefer"):
         def setup(protocol):
             self.protocol = protocol
     
         factory = TestFactory(sslmode)
+        self.closeDeferred = factory.closeDeferred
         self.connector = reactor.connectTCP(host, port, factory)
         
         return factory.deferred.addCallback(setup)
