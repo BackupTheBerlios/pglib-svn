@@ -4,7 +4,7 @@ Execute with psql -U pglib -d pglib
 */
 
 -- simple function
-CREATE FUNCTION echo(data text) RETURNS text AS $$
+CREATE OR REPLACE FUNCTION echo(data text) RETURNS text AS $$
 BEGIN
         RETURN data;
 END;
@@ -12,7 +12,7 @@ $$ LANGUAGE plpgsql;
 
 
 -- function used to test cancel
-CREATE FUNCTION loop() RETURNS void AS $$
+CREATE OR REPLACE FUNCTION loop() RETURNS void AS $$
 BEGIN
         LOOP
         END LOOP;
@@ -21,12 +21,22 @@ $$ LANGUAGE plpgsql;
 
 
 -- some table
+DROP TABLE TestRW;
+DROP TABLE TestR;
+DROP TABLE TestCopy;
+
+
 CREATE TABLE TestRW (
        x INTEGER,
        s TEXT
 );
 
 CREATE TABLE TestR (
+       x INTEGER,
+       s TEXT
+);
+
+CREATE TABLE TestCopy (
        x INTEGER,
        s TEXT
 );
@@ -39,3 +49,4 @@ INSERT INTO TestR Values (2, 'B');
 -- privileges setup
 GRANT ALL PRIVILEGES ON TestR TO PUBLIC;
 GRANT ALL PRIVILEGES ON TestRW TO PUBLIC;
+GRANT ALL PRIVILEGES ON TestCopy TO PUBLIC;

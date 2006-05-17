@@ -9,6 +9,7 @@ Read LICENSE file for more informations.
 """
 
 
+import os
 import sys
 sys.path.append("../")
 
@@ -23,7 +24,8 @@ import protocol
 host = "localhost"
 port = 5432
 
-SSL = True # set to False if SSL not enabled on PostgreSQL
+# set to False if SSL is not enabled on PostgreSQL server
+SSL = True
 
 # test functions oids (you have to know this) # XXX
 # SELECT oid FROM pg_proc WHERE proname = 'echo';
@@ -33,6 +35,12 @@ loopOid = 19214
 
 # error code for a cancelled request
 CANCEL_ERROR_CODE = "57014"
+
+# database setup
+cmd = "psql -h %s -p %d -U pglib -d pglib -f postsetup.sql" % (host, port)
+status = os.system(cmd)
+if status != 0:
+    raise Exception("database setup failed")
 
 
 # utility function
@@ -261,7 +269,6 @@ class TestSimpleQuery(TestCaseCommon):
 
     def testInsert(self):
         def cbLogin(params):
-            # XXX TODO these values must be removed...
             return self.protocol.execute("""
             INSERT INTO TestRW VALUES (10, 'Z')
             """)
@@ -277,7 +284,6 @@ class TestSimpleQuery(TestCaseCommon):
 
     def testUpdate(self):
         def cbLogin(params):
-            # XXX TODO (new != old)
             return self.protocol.execute("""
             UPDATE TestRW SET s = 'B' WHERE x = 2
             """)
@@ -449,3 +455,31 @@ class TestSSL(TestCaseCommon):
                                    )
         
         return self.failUnlessFailure(d, protocol.PgError)
+
+class TestCopy(TestCaseCommon):
+    def testCopyIn(self):
+        def cbLogin(params):
+            return self.protocol.execute("""
+            COPY
+            """)
+                
+        d = self.login().addCallback(cbLogin)
+        return d
+
+    def testCopyOut(self):
+        def cbLogin(params):
+            return self.protocol.execute("""
+            COPY
+            """)
+                
+        d = self.login().addCallback(cbLogin)
+        return d
+
+    def testCopyOutFail(self):
+        def cbLogin(params):
+            return self.protocol.execute("""
+            COPY
+            """)
+                
+        d = self.login().addCallback(cbLogin)
+        return d
