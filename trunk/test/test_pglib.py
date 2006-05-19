@@ -27,20 +27,32 @@ port = 5432
 # set to False if SSL is not enabled on PostgreSQL server
 SSL = True
 
-# test functions oids (you have to know this) # XXX
-# SELECT oid FROM pg_proc WHERE proname = 'echo';
-# XXX TODO retrieve these with a query
-echoOid = 19213
-loopOid = 19214
 
 # error code for a cancelled request
 CANCEL_ERROR_CODE = "57014"
+
+# error code for failed XXX
+FAILED_XXX_ERROR_CODE = "28000"
+
+
 
 # database setup
 cmd = "psql -h %s -p %d -U pglib -d pglib -f postsetup.sql" % (host, port)
 status = os.system(cmd)
 if status != 0:
     raise Exception("database setup failed")
+
+# XXX find the test functions oids
+query = '"SELECT oid FROM pg_proc WHERE proname = %s"'
+cmd = "psql -t --set format=unaligned -h " \
+    "%s -p %d -U pglib -d pglib -c " % (host, port)
+
+echoOid = os.popen(cmd + query % "'echo'").read()
+loopOid = os.popen(cmd + query % "'loop'").read()
+
+echoOid = int(echoOid.strip())
+loopOid = int(loopOid.strip())
+
 
 
 # utility function
@@ -411,7 +423,7 @@ class TestSSL(TestCaseCommon):
         
             def ebLogin(reason):
                 code = reason.value.args["C"]
-                self.failUnlessEqual(code, "28000")
+                self.failUnlessEqual(code, FAILED_XXX_ERROR_CODE)
                 
                 return reason
         
@@ -445,7 +457,7 @@ class TestSSL(TestCaseCommon):
         
         def ebLogin(reason):
             code = reason.value.args["C"]
-            self.failUnlessEqual(code, "28000")
+            self.failUnlessEqual(code, FAILED_XXX_ERROR_CODE)
         
             return reason
         
@@ -456,30 +468,31 @@ class TestSSL(TestCaseCommon):
         
         return self.failUnlessFailure(d, protocol.PgError)
 
-class TestCopy(TestCaseCommon):
-    def testCopyIn(self):
-        def cbLogin(params):
-            return self.protocol.execute("""
-            COPY
-            """)
-                
-        d = self.login().addCallback(cbLogin)
-        return d
 
-    def testCopyOut(self):
-        def cbLogin(params):
-            return self.protocol.execute("""
-            COPY
-            """)
+# class TestCopy(TestCaseCommon):
+#     def testCopyIn(self):
+#         def cbLogin(params):
+#             return self.protocol.execute("""
+#             COPY TestCopy FROM STDIN WITH delimiter '|'
+#             """)
                 
-        d = self.login().addCallback(cbLogin)
-        return d
+#         d = self.login().addCallback(cbLogin)
+#         return d
 
-    def testCopyOutFail(self):
-        def cbLogin(params):
-            return self.protocol.execute("""
-            COPY
-            """)
+#     def testCopyOut(self):
+#         def cbLogin(params):
+#             return self.protocol.execute("""
+#             COPY TestCopy TO STDOUT WITH delimiter '|'
+#             """)
                 
-        d = self.login().addCallback(cbLogin)
-        return d
+#         d = self.login().addCallback(cbLogin)
+#         return d
+
+#     def testCopyOutFail(self):
+#         def cbLogin(params):
+#             return self.protocol.execute("""
+#             COPY TestCopy TO STDOUT WITH delimiter '|'
+#             """)
+                
+#         d = self.login().addCallback(cbLogin)
+#         return d
