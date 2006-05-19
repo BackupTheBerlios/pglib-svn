@@ -469,30 +469,30 @@ class TestSSL(TestCaseCommon):
         return self.failUnlessFailure(d, protocol.PgError)
 
 
-# class TestCopy(TestCaseCommon):
-#     def testCopyIn(self):
-#         def cbLogin(params):
-#             return self.protocol.execute("""
-#             COPY TestCopy FROM STDIN WITH delimiter '|'
-#             """)
+class TestCopy(TestCaseCommon):
+    def testCopyIn(self):
+        def cbLogin(params):
+            return self.protocol.execute("""
+            COPY TestCopy FROM STDIN WITH delimiter '|'
+            """)
                 
-#         d = self.login().addCallback(cbLogin)
-#         return d
+        d = self.login().addCallback(cbLogin)
+        return d
 
-#     def testCopyOut(self):
-#         def cbLogin(params):
-#             return self.protocol.execute("""
-#             COPY TestCopy TO STDOUT WITH delimiter '|'
-#             """)
+    def testCopyOut(self):
+        def cbLogin(params):
+            return self.protocol.execute("""
+            COPY TestCopy TO STDOUT WITH delimiter '|'
+            """)
                 
-#         d = self.login().addCallback(cbLogin)
-#         return d
+        d = self.login().addCallback(cbLogin)
+        return d
 
-#     def testCopyOutFail(self):
-#         def cbLogin(params):
-#             return self.protocol.execute("""
-#             COPY TestCopy TO STDOUT WITH delimiter '|'
-#             """)
+    def testCopyOutFail(self):
+        def cbLogin(params):
+            return self.protocol.execute("""
+            COPY TestCopy TO STDOUT WITH delimiter '|'
+            """)
                 
-#         d = self.login().addCallback(cbLogin)
-#         return d
+        d = self.login().addCallback(cbLogin)
+        return d
