@@ -41,11 +41,21 @@ class IConsumer(Interface):
     """A file like object, capable of reading/consume data.
     """
 
+    def description(ntuples, binaryTuples):
+        """Description.
+
+        TODO in the current implementation, we ignore firmat codes.
+        All columns have the same format.
+        """
+        
     def write(data):
         """Read data.
+
+        The backend always send one row.
         """
 
-    def close():
+    # XXX TODO rename done() ?
+    def complete():
         """We have no more data to give to you.
         """
 
@@ -53,10 +63,18 @@ class IProducer(Interface):
     """A file object, capable of writing/producing data.
     """
 
+    def description(ntuples, binaryTuples):
+        """Description.
+
+        TODO in the current implementation, we ignore firmat codes.
+        All columns have the same format.
+        """
+    
     def read():
         """Request some data.
         
         Return the empty string when no more data is available.
+        It is not required to send a row.
         """
 
 class IRowConsumer(Interface):
@@ -76,42 +94,74 @@ class IRowConsumer(Interface):
         """Handle the row data.
         """
 
-    def complete(data):
+    # XXX cmdStatus, cmdTuples, oidValue
+    def complete(status, rows, oid):
         """The command has complete, no more data.
 
-        Return an object implementing the IPgResult interface, with
+        status is the command status flag (usually the name of command)
+        rows is the number of rows affected by the command
+        oid is the OID of the inserted row, if available
+
+        Return an object implementing the IResult interface, with
         the result of the query.
         """
 
 
 class IRowDescription(Interface):
     """A row description.
+
+    XXX TODO
     """
 
+    fname = Attribute("The field name")
+    ftable = Attribute(
+        """The OID of the table, if the field can be identified as a
+        column, 0 otherwise"""
+        )
+    ftablecol = Attribute(
+        """The attribute number of the column, if the fiels can be
+        identifies as a columns, 0 otherwis3"""
+        )
+    ftype = Attribute("The object ID of the field's data type")
+    fmod = Attribute("The type modifier")
+    fformat = Attribute(
+        """The format code being used for the field.
+        In the current implementation the format is the same for all
+        columns, so you can safely check the binaryTuples attributes of
+        the IPgResult"""
+        )
+    
+class IResult(Interface):
+    """The result of a query.
+
+    XXX TODO
+    """
+    
+    # XXX these two are not really useful
     ntuples = Attribute(
         "The number of rows (tuples) in the query result"
         )
     nfields = Attribute(
-        "The number of columns (fields) in each row in the" \
-        "query result"
+        """The number of columns (fields) in each row in the query
+        result"""
         )
-    fnames = Attribute("Columns name (a list)")
-#    fnumber = Attribute("
-#    ftable = Attribute("the OID of the table from witch
-#    ftablecol
-#    fformat
-#    ftype
-#    fmod
-#    fsize
-#    binaryTuples
-
+    binaryTuples = Attribute(
+        """This is 1 if all columns are in binary format, 0 for
+        text"""
+        )
     
-class IPgResult(Interface):
-    """The result of a query.
-    """
-
-    description = Attribute("An object implementing IRowDescription")
-    status = Attribute("The result status of the command")
+    descriptions = Attribute(
+        "A list of objects implementing IRowDescription"
+        )
+    
+    status = Attribute("The status of the SQL command")
+    cmdStatus = Attribute(
+        "The command status tag (usually the name of the command"
+        )
+    cmdTuples = Attribute(
+        "The number of the rows affected by the SQL command"
+        )
+    oidValue = Attribute("The OID of the inserted row, if available")
     
     rows = Attribute(
         """A list of list, containig the rows.

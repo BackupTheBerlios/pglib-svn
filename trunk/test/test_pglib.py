@@ -13,10 +13,15 @@ import os
 import sys
 sys.path.append("../")
 
+from cStringIO import StringIO
+
+from zope.interface import implements
+
 from twisted.python import log
 from twisted.internet import reactor, defer, error
 from twisted.trial import unittest
 
+import ipg
 import protocol
 
 
@@ -88,6 +93,42 @@ class TestFactory(protocol.PgFactory):
     def clientConnectionFailed(self, connector, reason):
         log.msg("Connection failed. Reason:", reason)
 
+
+class Producer(object):
+    implements(ipg.IProducer)
+
+    def __init__(self, fail=False):
+        self.fail = fail
+        
+        self.fp = StringIO(
+            """1|pglib
+            2|manlio"""
+            )
+        
+    def description(self, ntuples, binaryTuples):
+        print "producer:", ntuples, binaryTuples
+
+    def read(self):
+        if self.fail:
+            raise Exception("copy failed")
+        
+        return self.fp.read()
+
+class Consumer(object):
+    implements(ipg.IConsumer)
+
+    def __init__(self):
+        self.fp = StringIO()
+        
+    def description(self, ntuples, binaryTuples):
+        print "consumer:", ntuples, binaryTuples
+
+    def write(self, data):
+        self.fp.write(data)
+
+    def complete(self):
+        self.data = self.fp.getvalue()
+        
 
 class TestCaseCommon(unittest.TestCase):
     """Common methods for our Test Case
@@ -472,27 +513,58 @@ class TestSSL(TestCaseCommon):
 class TestCopy(TestCaseCommon):
     def testCopyIn(self):
         def cbLogin(params):
+            self.protocol.producer = Producer()
+            
             return self.protocol.execute("""
             COPY TestCopy FROM STDIN WITH delimiter '|'
             """)
                 
-        d = self.login().addCallback(cbLogin)
+        def cbCopy(result):
+            self.failUnlessEqual(result.cmdStatus, "COPY")
+                                 
+        d = self.login().addCallback(cbLogin
+                                     ).addCallback(cbCopy)
         return d
 
     def testCopyOut(self):
         def cbLogin(params):
+            self.protocol.consumer = Consumer()
+            
             return self.protocol.execute("""
             COPY TestCopy TO STDOUT WITH delimiter '|'
             """)
+        
+        def cbCopy(result):
+            data = self.protocol.consumer.data
+
+            # XXX the data we write with testCopyIn
+            expected = "1|pglib\n2|manlio\n"
+            
+            self.failUnlessEqual(result.cmdStatus, "COPY")
+            self.failUnlessEqual(data, expected)
                 
-        d = self.login().addCallback(cbLogin)
+        d = self.login().addCallback(cbLogin
+                                     ).addCallback(cbCopy)
         return d
 
-    def testCopyOutFail(self):
+    def testCopyInFail(self):
         def cbLogin(params):
+            self.protocol.producer = Producer(fail=True)
+            
             return self.protocol.execute("""
-            COPY TestCopy TO STDOUT WITH delimiter '|'
+            COPY TestCopy FROM STDIN WITH delimiter '|'
             """)
                 
-        d = self.login().addCallback(cbLogin)
-        return d
+        def ebCopy(reason):
+            message = reason.value.args["M"]
+            
+            # XXX the message should be:
+            # COPY from stdin failed: copy failed
+            self.failUnlessIn("copy failed", message)
+            
+            return reason
+        
+        d = self.login().addCallback(cbLogin
+                                     ).addErrback(ebCopy)
+        
+        return self.failUnlessFailure(d, protocol.PgError)

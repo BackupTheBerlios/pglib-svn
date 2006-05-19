@@ -14,7 +14,7 @@ import md5
 
 from zope.interface import implements
 from twisted.python import log
-from twisted.internet import protocol, defer, interfaces
+from twisted.internet import reactor, protocol, defer, interfaces
 
 import ipg
 
@@ -571,7 +571,7 @@ class PgProtocol(protocol.Protocol):
         tags = tag.split(" ")
         n = len(tags)
         
-        cmdStatus = tags[0]
+        cmdStatus = tags[0][:-1] # remove the \0
         if n == 3:
             oid  = int(tags[1])
             rows = tags[2] # XXX
@@ -626,8 +626,72 @@ class PgProtocol(protocol.Protocol):
     #
     # COPY Operations
     #
+    def _copyData(self):
+        # helper method
+        try:
+            data = self.producer.read()
+            if not data:
+                # COPY terminated
+                self.copyDone()
+            else:
+                self.copyData(data)
+                
+                # continue the transfer
+                reactor.callLater(0, self._copyData)
+        except Exception, error:
+            log.err(error)
+            self.copyFail(str(error))
     
-    #
+    def message_G(self, data):
+        """CopyInResponse: the frontend must now send copy data.
+        """
+
+        binaryTuples, ntuples = unpack("!BH", data[:3])
+        formats = unpack("!" + "H" * ntuples, data[3:])
+
+        try:
+            # XXX TODO we ignore formats, all columns have the same
+            # format code
+            self.producer.description(ntuples, binaryTuples)
+        except Exception, error:
+            log.err(error)
+            self.copyFail(str(error))
+
+            
+        # send all data from producer to the backend
+        # XXX
+        reactor.callLater(0, self._copyData)
+        
+    def message_H(self, data):
+        """CopyOutResponse: the frontend must now receive copy data.
+        """
+
+        binaryTuples, ntuples = unpack("!BH", data[:3])
+        formats = unpack("!" + "H" * ntuples, data[3:])
+
+        # XXX TODO we ignore formats, all columns have the same
+        # format code
+        # we ignore errors, since the frontend cannot abort data
+        # transfer
+        self.consumer.description(ntuples, binaryTuples)
+    
+    def message_d(self, data):
+        """CopyData: data for COPY.
+
+        The backend sends always one message per row.
+        """
+
+        # we ignore errors, since the frontend cannot abort data transfer
+        self.consumer.write(data)
+    
+    def message_c(self, data):
+        """CopyDone: COPY transfer complete.
+        """
+
+        assert not data
+        self.consumer.complete()
+
+        
     # Asynchronous Operations
     #
     def message_A(self, data):
@@ -729,6 +793,35 @@ class PgProtocol(protocol.Protocol):
 
         return self.sendMessage(request)
     
+    def copyData(self, data):
+        """Copydata: send data to backend, for COPY operations.
+
+        data needs not to be a row.
+
+        internal method
+        """
+
+        self._sendMessage("d", data)
+    
+    def copyFail(self, error):
+        """CopyFail: COPY transfer failed.
+        
+        error is an error messages (used by the backend in its
+        ErrorResponse.
+        
+        internal method
+        """
+
+        self._sendMessage("f", error + "\0")
+        
+    def copyDone(self):
+        """CopyDone: COPY transfer complete.
+        
+        internal method
+        """
+
+        self._sendMessage("c", "")
+        
     def getCancel(self):
         """Request a cancellation object for this connection.
         """
@@ -826,20 +919,39 @@ class Handler(object):
     def notify(self, notify):
         log.msg("Notification:", str(notify))
 
+
+class RowDescription(object):
+    implements(ipg.IRowDescription)
+    
+    pass
+
+class Result(object):
+    implements(ipg.IResult)
+
+    def __init__(self):
+        self.descriptions = None
+        self.row = []
         
 class RowConsumer(object):
     implements(ipg.IRowConsumer)
     
     def __init__(self):
-        pass
+        self.result = Result()
 
     def description(self, data):
-        print "description", repr(data)
+        self.result.description = data
 
     def row(self, data):
-        print "row", repr(data)
+        self.result.row.append(data)
 
-    def complete(self, cmdStatus, oid, rows):
-        print "command complete", cmdStatus, oid, rows
+    def complete(self, status, rows, oid):
+        self.result.cmdStatus = status
+        self.result.cmdTuples = rows
+        self.result.oidValue = oid
+        
+        # setup the next cycle XXX
+        tmp = self.result
+        self.result = Result()
+        
+        return tmp
 
-        return None
