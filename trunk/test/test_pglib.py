@@ -3,7 +3,7 @@
 $Id$
 
 THIS SOFTWARE IS UNDER MIT LICENSE.
-(C) 2006 Perillo Manlio (manlio.perillo@gmail.com)
+Copyright (c) 2006 Perillo Manlio (manlio.perillo@gmail.com)
 
 Read LICENSE file for more informations.
 """
@@ -13,7 +13,10 @@ import os
 import sys
 sys.path.append("../")
 
-from cStringIO import StringIO
+try:
+    from cStringIO import StringIO
+except ImportError:
+    from StringIO import StringIO
 
 from zope.interface import implements
 
@@ -30,15 +33,13 @@ host = "localhost"
 port = 5432
 
 # set to False if SSL is not enabled on PostgreSQL server
-SSL = True
+SSL = False
 
 
-# error code for a cancelled request
+# some error codes
 CANCEL_ERROR_CODE = "57014"
-
-# error code for failed XXX
-FAILED_XXX_ERROR_CODE = "28000"
-
+AUTHENTICATION_ERROR_CODE = "28000"
+QUERY_ERROR_CODE = "42703"
 
 
 # database setup
@@ -94,25 +95,36 @@ class TestFactory(protocol.PgFactory):
         log.msg("Connection failed. Reason:", reason)
 
 
+copyData = "1|pglib\n2|manlio\n3|perillo\n"
+
 class Producer(object):
     implements(ipg.IProducer)
 
     def __init__(self, fail=False):
         self.fail = fail
         
-        self.fp = StringIO(
-            """1|pglib
-            2|manlio"""
-            )
+        self.fp = StringIO(copyData)
         
     def description(self, ntuples, binaryTuples):
-        print "producer:", ntuples, binaryTuples
-
+        self.ntuples = ntuples
+        self.binaryTuples = binaryTuples
+        
     def read(self):
         if self.fail:
             raise Exception("copy failed")
         
-        return self.fp.read()
+        return self.fp.readline()
+
+    def close(self):
+        result = protocol.Result()
+        
+        # XXX
+        result.ntuples = self.ntuples
+        result.binaryTuples = self.binaryTuples
+
+        result.status = protocol.PGRES_COPY_IN
+        
+        return result
 
 class Consumer(object):
     implements(ipg.IConsumer)
@@ -121,13 +133,25 @@ class Consumer(object):
         self.fp = StringIO()
         
     def description(self, ntuples, binaryTuples):
-        print "consumer:", ntuples, binaryTuples
-
+        self.ntuples = ntuples
+        self.binaryTuples = binaryTuples
+        
     def write(self, data):
         self.fp.write(data)
 
-    def complete(self):
+    def close(self):
         self.data = self.fp.getvalue()
+
+        result = protocol.Result()
+        
+        # XXX
+        result.ntuples = self.ntuples
+        result.binaryTuples = self.binaryTuples
+        
+        result.status = protocol.PGRES_COPY_OUT
+        
+        return result
+
         
 
 class TestCaseCommon(unittest.TestCase):
@@ -159,10 +183,6 @@ class TestCaseCommon(unittest.TestCase):
         return self.protocol.login(
             user="pglib_md5", password="test", database="pglib"
             )
-    
-    def getFnOid(self):
-        # XXX TODO
-        pass
 
 
 class TestLogin(TestCaseCommon):
@@ -196,14 +216,18 @@ class TestLogin(TestCaseCommon):
         return self.failUnlessFailure(d, protocol.AuthenticationError)
     
     def testClearTextFail(self):
+        def ebLogin(reason):
+            code = reason.value.args["C"]
+            self.failUnlessEqual(code, AUTHENTICATION_ERROR_CODE)
+
+            return reason
+        
         d = self.protocol.login(
             user="pglib_clear", password="xxx", database="pglib"
             )
         
-        
-        self.failUnlessFailure(d, protocol.PgError)
-        return d
-    
+        d.addErrback(ebLogin)
+        return self.failUnlessFailure(d, protocol.PgError)
     
     def testMD5(self):
         def callback(params):
@@ -240,8 +264,15 @@ class TestSimpleQuery(TestCaseCommon):
     def testQueryFail(self):
         def cbLogin(params):
             return self.protocol.execute("SELECT xxx")
-            
-        d = self.login().addCallback(cbLogin)
+        
+        def ebQuery(reason):
+            code = reason.value.args["C"]
+            self.failUnlessEqual(code, QUERY_ERROR_CODE)
+
+            return reason
+        
+        d = self.login().addCallback(cbLogin
+                                     ).addErrback(ebQuery)
         return self.failUnlessFailure(d, protocol.PgError)
 
     def testTransaction(self):
@@ -295,10 +326,7 @@ class TestSimpleQuery(TestCaseCommon):
             return self.protocol.execute("")
             
         def cbQuery(result):
-            self.failUnlessEqual(self.protocol.status,
-                                 protocol.CONNECTION_OK)
-
-            self.failUnlessEqual(result, "empty query")
+            self.failUnlessEqual(result.status, protocol.PGRES_EMPTY_QUERY)
         
         d = self.login()
         return d.addCallback(cbLogin
@@ -312,9 +340,9 @@ class TestSimpleQuery(TestCaseCommon):
             """)
             
         def cbQuery(result):
-            self.failUnlessEqual(self.protocol.status,
-                                 protocol.CONNECTION_OK)
-
+            self.failUnlessEqual(result.status, protocol.PGRES_TUPLES_OK)
+            self.failUnlessEqual(result.rows, [["1", "A"], ["2", "B"]])
+            
         d = self.login()
         return d.addCallback(cbLogin
                              ).addCallback(cbQuery
@@ -323,13 +351,14 @@ class TestSimpleQuery(TestCaseCommon):
     def testInsert(self):
         def cbLogin(params):
             return self.protocol.execute("""
-            INSERT INTO TestRW VALUES (10, 'Z')
+            INSERT INTO TestRW VALUES (3, 'C')
             """)
             
         def cbQuery(result):
-            self.failUnlessEqual(self.protocol.status,
-                                 protocol.CONNECTION_OK)
-
+            self.failUnlessEqual(result.status, protocol.PGRES_COMMAND_OK)
+            self.failUnlessEqual(result.rows, [])
+            self.failUnlessEqual(result.cmdTuples, 1)
+            
         d = self.login()
         return d.addCallback(cbLogin
                              ).addCallback(cbQuery
@@ -338,13 +367,30 @@ class TestSimpleQuery(TestCaseCommon):
     def testUpdate(self):
         def cbLogin(params):
             return self.protocol.execute("""
-            UPDATE TestRW SET s = 'B' WHERE x = 2
+            UPDATE TestRW SET s = 'Z' WHERE x = 2
             """)
             
         def cbQuery(result):
-            self.failUnlessEqual(self.protocol.status,
-                                 protocol.CONNECTION_OK)
-
+            self.failUnlessEqual(result.status, protocol.PGRES_COMMAND_OK)
+            self.failUnlessEqual(result.rows, [])
+            self.failUnlessEqual(result.cmdTuples, 1)
+            
+        d = self.login()
+        return d.addCallback(cbLogin
+                             ).addCallback(cbQuery
+                                           )
+    
+    def testDelete(self):
+        def cbLogin(params):
+            return self.protocol.execute("""
+            DELETE FROM TestRW WHERE x = 1
+            """)
+            
+        def cbQuery(result):
+            self.failUnlessEqual(result.status, protocol.PGRES_COMMAND_OK)
+            self.failUnlessEqual(result.rows, [])
+            self.failUnlessEqual(result.cmdTuples, 1)
+            
         d = self.login()
         return d.addCallback(cbLogin
                              ).addCallback(cbQuery
@@ -356,10 +402,10 @@ class TestFunctionCall(TestCaseCommon):
     def testFunction(self):
         def cbLogin(params):
             # call the echo function
-            return self.protocol.fn(echoOid, 0, 'echo')
+            return self.protocol.fn(echoOid, 0, "echo")
             
         def cbCall(result):
-            self.failUnlessEqual(result, 'echo')
+            self.failUnlessEqual(result, "echo")
 
         
         d = self.login()
@@ -371,7 +417,7 @@ class TestFunctionCall(TestCaseCommon):
 class TestNotification(TestCaseCommon):
     def testNotification(self):
         def cbLogin(params):
-            # register oursel for listening a notification, and raise it
+            # register ourself for listening a notification, and raise it
             return self.protocol.execute(
                 "LISTEN pglib; NOTIFY pglib;"
                 )
@@ -413,6 +459,7 @@ class TestCancel(TestCaseCommon):
 
     def testCancel(self):
         def cbLogin(params):
+            # call the loop function
             return self.protocol.fn(loopOid, 0)
 
         def ebCall(reason):
@@ -434,7 +481,6 @@ class TestCancel(TestCaseCommon):
         return self.failUnlessFailure(d, protocol.PgError)
 
 
-# XXX This test will fail if SSL is not enabled in PostgreSQL.
 class TestSSL(TestCaseCommon):
     # XXX sslmode "prefer" and "allow" cannot be tested
     def setUp(self):
@@ -451,7 +497,7 @@ class TestSSL(TestCaseCommon):
                 self.failUnless(isinstance(params, dict))
         
 
-            d = self.connect("enable")
+            d = self.connect("require")
             return d.addCallback(cbConnect
                                  ).addCallback(cbLogin
                                                )
@@ -464,17 +510,28 @@ class TestSSL(TestCaseCommon):
         
             def ebLogin(reason):
                 code = reason.value.args["C"]
-                self.failUnlessEqual(code, FAILED_XXX_ERROR_CODE)
+                self.failUnlessEqual(code, AUTHENTICATION_ERROR_CODE)
                 
                 return reason
         
-            d = self.connect("enable")
+            d = self.connect("require")
             d.addCallback(cbConnect
                           ).addErrback(ebLogin
                                        )
             
             return self.failUnlessFailure(d, protocol.PgError)
-
+    else:
+        def tearDown(self):
+            pass
+        
+        def testSSLRequireFail(self):
+            factory = TestFactory("require")
+            self.closeDeferred = factory.closeDeferred
+            self.connector = reactor.connectTCP(host, port, factory)
+        
+            # the connection is aborted
+            return factory.closeDeferred.addCallback(lambda _: None)
+            
     def testSSLDisable(self):
         def cbConnect(result):
             return self.protocol.login(
@@ -484,7 +541,11 @@ class TestSSL(TestCaseCommon):
         def cbLogin(params):
             self.failUnless(isinstance(params, dict))
         
-
+            self.protocol.finish()
+        
+            # make sure to wait for connection close
+            return self.closeDeferred
+    
         d = self.connect("disable")
         return d.addCallback(cbConnect
                              ).addCallback(cbLogin
@@ -498,7 +559,7 @@ class TestSSL(TestCaseCommon):
         
         def ebLogin(reason):
             code = reason.value.args["C"]
-            self.failUnlessEqual(code, FAILED_XXX_ERROR_CODE)
+            self.failUnlessEqual(code, AUTHENTICATION_ERROR_CODE)
         
             return reason
         
@@ -537,11 +598,9 @@ class TestCopy(TestCaseCommon):
         def cbCopy(result):
             data = self.protocol.consumer.data
 
-            # XXX the data we write with testCopyIn
-            expected = "1|pglib\n2|manlio\n"
-            
             self.failUnlessEqual(result.cmdStatus, "COPY")
-            self.failUnlessEqual(data, expected)
+            # XXX the data we write with testCopyIn
+            self.failUnlessEqual(data, copyData)
                 
         d = self.login().addCallback(cbLogin
                                      ).addCallback(cbCopy)

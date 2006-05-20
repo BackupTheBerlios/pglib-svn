@@ -3,7 +3,7 @@
 $Id$
 
 THIS SOFTWARE IS UNDER MIT LICENSE.
-(C) 2006 Perillo Manlio (manlio.perillo@gmail.com)
+Copyright (c) 2006 Perillo Manlio (manlio.perillo@gmail.com)
 
 Read LICENSE file for more informations.
 """
@@ -12,7 +12,13 @@ Read LICENSE file for more informations.
 from struct import pack, unpack
 import md5
 
+try:
+    from cStringIO import StringIO
+except ImportError:
+    from StringIO import StringIO
+
 from zope.interface import implements
+
 from twisted.python import log
 from twisted.internet import reactor, protocol, defer, interfaces
 
@@ -33,25 +39,25 @@ PG_HEADER_SIZE = 5 # 1 byte opcode + 4 byte lenght
 
 InvalidOid = 0 # XXX
 
-# connection status (XXX not realy useful here)
+# connection status (XXX not really useful)
 CONNECTION_STARTED = 0           # waiting for connection to be made
 CONNECTION_MADE = 1              # connection ok; waiting to send
 CONNECTION_AWAITING_RESPONSE = 2 # waiting for a response from the
                                  # server # XXX what response?
-CONNECTION_AUTH_OK = 3           # received authetication; waitig for backend
+CONNECTION_AUTH_OK = 3           # received authentication; waitig for backend
                                  # start-up finish
 CONNECTION_SSL_STARTUP = 4       # negotiating SSL encryption
 CONNECTION_SETENV = 5            # negotiating enviroment-driven
-                                 # parameter # settings # XXX what is this?
+                                 # parameter settings # XXX what is this?
 CONNECTION_OK = 6                # connection ok; backend ready
-CONNECTION_BAD = None            # connection procedure failed
+CONNECTION_BAD = -1              # connection procedure failed
 
 # transaction status
 PGTRANS_IDLE = "I"     # currently idle
 PGTRANS_INTRANS = "T"  # idle, in a valid transaction block
 PGTRANS_INERROR = "E"  # idle, in a failed transaction block
 PGTRANS_ACTIVE = "A"   # a command is in progress (used only in the frontend)
-PGTRANS_UNKNOWN = None # the connection is bad # XXX
+PGTRANS_UNKNOWN = -1   # the connection is bad # XXX
 
 # error field codes
 PG_DIAG_SEVERITY = "S"
@@ -75,8 +81,8 @@ PGRES_TUPLES_OK = 2        # successful completion of a command
                            # returning data (such as SELECT or SHOW)
 PGRES_COPY_OUT = 3         # Copy Out (from server) data transfer started
 PGRES_COPY_IN = 4          # Copy In (to server) data transfer started
-# XXX these are not realy useful
-PGRES_BAD_RESPONSE = -1    # the server response wa not understood
+# XXX these are not really useful
+PGRES_BAD_RESPONSE = -1    # the server response was not understood
 PGRES_NONFATAL_ERROR = -2  # a non fatal error (a notice or warning)
                            # occurred
 PGRES_FATAL_ERROR = -3     # a fatal error occurred
@@ -102,7 +108,7 @@ class PgError(Error):
         return self.args["M"]
 
     def errorField(self, field):
-        """Returns an individual field of an error report, or None if
+        """Return an individual field of an error report, or None if
         the specified fiels is not included.
         """
 
@@ -133,6 +139,8 @@ class PgCancel(object):
 
     def cancel(self, timeout=30):
         """Send a cancel request to the backend.
+
+        Return a deferred.
         """
         
         from twisted.internet import reactor
@@ -141,7 +149,7 @@ class PgCancel(object):
         factory = CancelFactory(self.backendPID, self.cancelKey)
         reactor.connectTCP(self.addr.host, self.addr.port, factory, timeout)
         
-        # returns only when the request has been sent
+        # returns only when the request has been received by the backend
         return factory.deferred
 
 
@@ -168,10 +176,6 @@ class PgRequest(object):
 
         self.deferred = defer.Deferred()
 
-
-class PgResult(object):
-    """XXX TODO
-    """
 
 
 class PgProtocol(protocol.Protocol):
@@ -225,7 +229,7 @@ class PgProtocol(protocol.Protocol):
         self._last = None # last request we made
 
     def _getContextFactory(self):
-        context = getattr(self.factory, "context", None)
+        context = getattr(self.factory, "sslContext", None)
         if context is not None:
             return self.context
         
@@ -240,10 +244,10 @@ class PgProtocol(protocol.Protocol):
 
     def connectionMade(self):
         self.status = CONNECTION_MADE
-        self.transactionStatus = PGTRANS_UNKNOWN
+        self.transactionStatus = PGTRANS_UNKNOWN # XXX
         
         # Unfortunately the response to a SSL request is not a
-        # standard message: there is not lenght.
+        # standard message: there is no lenght.
         # So we use two version of dataReceived method
 
         # XXX "allow" and "prefer" are not fully supported.
@@ -252,7 +256,7 @@ class PgProtocol(protocol.Protocol):
         # need of a reconnection, and this is possible only in an
         # higher level interface (see fe.py).
         #
-        # However prefer is still useful, since it allows to connect
+        # However "prefer" is still useful, since it allows to connect
         # to both SSL enabled or disabled servers.
         if self.factory.sslmode in ["disable", "allow"]:
             # no SSL negotiation
@@ -301,14 +305,14 @@ class PgProtocol(protocol.Protocol):
             self.messageReceived(opcode, payload)
 
     def _dataReceivedSSL(self, data):
-        """Handle backend response to our request of use SSL.
+        """Handle backend response to our request to use SSL.
         """
 
         log.msg("SSL Response:", data)
         
         if data == "S":
             # check the support for SSL
-            tls = self.transport #interfaces.ITLSTransport(self.transport, None)
+            tls = interfaces.ITLSTransport(self.transport, None)
             if tls is None:
                 err = RuntimeError(
                     "PgProtocol transport does not implements " \
@@ -330,7 +334,7 @@ class PgProtocol(protocol.Protocol):
                 
                 return
 
-            # ok, we can initialize SSL handshake
+            # ok, we can initialize TSL handshake
             tls.startTLS(context)
             self.dataReceived = self._dataReceived
 
@@ -340,14 +344,14 @@ class PgProtocol(protocol.Protocol):
             
             return
         elif data == "N":
-            if self.factory.sslmode == "required":
+            if self.factory.sslmode == "require":
                 err = RuntimeError(
                     "PostgreSQL backend does not support SSL, " \
                     "connection aborted"
                     )
                 log.err(err)
                 self.transport.loseConnection()
-                
+                    
                 return
             
             self.dataReceived = self._dataReceived
@@ -395,7 +399,6 @@ class PgProtocol(protocol.Protocol):
         if method is None:
             error = InvalidRequest(opcode)
             
-            # XXX
             if self._last is not None:
                 self._last.deferred.errback(error)
             else:
@@ -568,23 +571,22 @@ class PgProtocol(protocol.Protocol):
         """
 
         # parse the tag
-        tags = tag.split(" ")
+        tags = tag[:-1].split(" ") # remove the ending \0
         n = len(tags)
         
-        cmdStatus = tags[0][:-1] # remove the \0
+        cmdStatus = tags[0] 
         if n == 3:
             oid  = int(tags[1])
-            rows = tags[2] # XXX
+            rows = int(tags[2]) # XXX libpq uses a string
         elif n == 2:
             oid = None
-            rows = tags[1]
+            rows = int(tags[1])
         else:
             oid = None
             rows = 0
         
         self.lastResult = self.rowConsumer.complete(cmdStatus, oid,
                                                     rows)
-
     def message_T(self, data):
         """RowDescription: a description of row fields.
         """
@@ -602,14 +604,14 @@ class PgProtocol(protocol.Protocol):
         """EmptyQueryResponse: an empty query string was recognized.
         """
 
-        self.lastResult = "empty query"
+        self.lastResult = Result()
         
     
     #
     # Function Call (aka Fast Path Interface)
     #
-    # Note: this seems to be obsolete, but it is still used (and is much
-    # simpler) for large objects support by libpq
+    # Note: this seems to be obsolete, but it is still used (and it is
+    # much simpler) for large objects support by libpq
     def message_V(self, data):
         """FunctionCallResponse: the result from a function call.
         """
@@ -628,11 +630,14 @@ class PgProtocol(protocol.Protocol):
     #
     def _copyData(self):
         # helper method
+        
         try:
             data = self.producer.read()
             if not data:
                 # COPY terminated
                 self.copyDone()
+                
+                self.lastResult = self.producer.close()
             else:
                 self.copyData(data)
                 
@@ -659,7 +664,6 @@ class PgProtocol(protocol.Protocol):
 
             
         # send all data from producer to the backend
-        # XXX
         reactor.callLater(0, self._copyData)
         
     def message_H(self, data):
@@ -689,9 +693,11 @@ class PgProtocol(protocol.Protocol):
         """
 
         assert not data
-        self.consumer.complete()
 
-        
+        self.lastResult = self.consumer.close()
+
+    
+    #
     # Asynchronous Operations
     #
     def message_A(self, data):
@@ -704,7 +710,7 @@ class PgProtocol(protocol.Protocol):
         notify = Notification(pid, name, extra)
         self.handler.notify(notify)
         
-        # XXX store only the last notification
+        # XXX we store only the last notification
         self.lastNotify = notify
     
     
@@ -763,7 +769,7 @@ class PgProtocol(protocol.Protocol):
     def execute(self, query, *args, **kwargs):
         """Query: execute a simple query.
         
-        XXX TODO string interpolation and escaping.
+        XXX TODO string interpolation.
         """
 
         request = PgRequest("Q", query + "\0")
@@ -776,7 +782,7 @@ class PgProtocol(protocol.Protocol):
         
         arguments must be strings
         
-        XXX TODO: since I'm lazy, in the current implementation all
+        XXX TODO: In the current implementation all
         arguments (and the return value) must be of the same format.
         """
         
@@ -806,8 +812,8 @@ class PgProtocol(protocol.Protocol):
     def copyFail(self, error):
         """CopyFail: COPY transfer failed.
         
-        error is an error messages (used by the backend in its
-        ErrorResponse.
+        error is an error messages 
+        (used by the backend in its ErrorResponse)
         
         internal method
         """
@@ -849,6 +855,10 @@ class PgProtocol(protocol.Protocol):
         
         self.transport.loseConnection()
 	
+
+    #
+    # Helper methods
+    #
     def errorMessage(self):
         """Return the error message associated with th3 last command,
         or an empty string if there was no error.
@@ -864,12 +874,20 @@ class PgFactory(protocol.ClientFactory):
     """A simple factory that manages PgProtocol.
     """
     
+    sslContext = None
+    
     def __init__(self, sslmode="prefer"):
-        """sslmode can be:
-          disable
-          allow
-          prefer
-          require
+        """sslmode determine whether or with what priority an SSL
+        connection will be negotiated.
+        
+        There are four modes: "disable" will attempt only an
+        unencrypted SSL connection; "allow" will negotiate, trying
+        first a non-SSL connection, then if that fails, trying an
+        SSL connection; "prefer" (the default) will negotiate,
+        trying first an SSL connection, then if that fails, trying a
+        regular non-SSL conection; "require" will try only an SSL connection.
+        
+        TODO: in this layer, "allow" and "prefer" cannot be fully supported.
         """
         
         # we store sslmode here because it is used by cancel too.
@@ -907,7 +925,7 @@ class CancelFactory(PgFactory):
 
 
 #
-# Default implementations for ipg interfaces
+# Default implementations for required ipg interfaces
 #
 
 class Handler(object):
@@ -923,35 +941,92 @@ class Handler(object):
 class RowDescription(object):
     implements(ipg.IRowDescription)
     
-    pass
+    def __init__(self, fname, ftable, ftablecol, ftype, fsize, fmod,
+                 fformat):
+        self.fname = fname
+        self.ftable = ftable
+        self.ftablecol = ftablecol
+        self.ftype = ftype
+        self.fsize = fsize
+        self.fmod = fmod
+        self.fformat = fformat
 
 class Result(object):
     implements(ipg.IResult)
 
+    ntuples = None
+    nfields = None
+    binaryTuples = None
+    
+    status = PGRES_EMPTY_QUERY # convenience default
+    
+    cmdStatus = None
+    cmdTuples = None
+    oidvalue = None
+    
     def __init__(self):
-        self.descriptions = None
-        self.row = []
+        self.descriptions = []
+        self.rows = []
         
 class RowConsumer(object):
+    # XXX TODO write an optimized implementation in C, like pgasync.
+    
     implements(ipg.IRowConsumer)
     
     def __init__(self):
         self.result = Result()
 
     def description(self, data):
-        self.result.description = data
+        # parse the data
+        buf = StringIO(data)
+
+        (nfields,) = unpack("!H", buf.read(2))
+
+        pos = 2
+        for i in range(nfields):
+            ind = data.find("\0", pos)
+            fname = buf.read(ind - pos)
+            pos = ind + 19 # leading null plus 18 of int
+            
+            (
+                _, ftable, ftablecol, ftype, fsize, fmod, fformat
+                ) = unpack("!cIHIHIH", buf.read(19))
+            
+            desc = RowDescription(fname, ftable, ftablecol, ftype,
+                                  fsize, fmod, fformat)
+            self.result.descriptions.append(desc)
 
     def row(self, data):
-        self.result.row.append(data)
+        buf = StringIO(data)
+        
+        (ntuples,) = unpack("!H", buf.read(2))
 
-    def complete(self, status, rows, oid):
+        row = []
+        for i in range(ntuples):
+            (length,) = unpack("!I", buf.read(4))
+            if length == -1:
+                # a NULL value
+                row.append(None)
+            else:
+                row.append(buf.read(length))
+        
+        self.result.rows.append(row)
+    
+    def complete(self, status, oid, rows):
         self.result.cmdStatus = status
         self.result.cmdTuples = rows
         self.result.oidValue = oid
         
-        # setup the next cycle XXX
+        self.result.ntuples = len(self.result.rows)
+        self.result.binaryTuples = 0 # XXX TODO
+        
+        if self.result.ntuples > 0:
+            self.result.status = PGRES_TUPLES_OK
+        else:
+            self.result.status = PGRES_COMMAND_OK
+        
+        # prepare the next cycle XXX
         tmp = self.result
         self.result = Result()
         
         return tmp
-

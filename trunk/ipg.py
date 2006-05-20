@@ -1,9 +1,9 @@
-"""PostgreSQL Interface definitions.
+"""Interface definitions for pglib.
 
 $Id$
 
 THIS SOFTWARE IS UNDER MIT LICENSE.
-(C) 2006 Perillo Manlio (manlio.perillo@gmail.com)
+Copyright (c) 2006 Perillo Manlio (manlio.perillo@gmail.com)
 
 Read LICENSE file for more informations.
 """
@@ -12,13 +12,14 @@ from zope.interface import Interface, Attribute
 
 
 
-# XXX choose better names
 class IFastPath(Interface):
     """The Fast Path Interface to server functions.
     """
 
     def fn(fnid, fformat, *args):
         """Execute the function, given its oid.
+
+        fformat is 0 for text arguments, or 1 for binary.
         """
 
 #     transactionStatus = Attribute(
@@ -44,37 +45,52 @@ class IConsumer(Interface):
     def description(ntuples, binaryTuples):
         """Description.
 
-        TODO in the current implementation, we ignore firmat codes.
+        ntuples is the number of columns in the data to be copied.
+        binaryTuples is 0 when the overall COPY format is textual,
+        1 when binary.
+        
+        TODO in the current implementation, we ignore format codes.
         All columns have the same format.
         """
         
     def write(data):
-        """Read data.
+        """Read/Consume data.
 
-        The backend always send one row.
+        The backend always send one row at a time.
         """
 
-    # XXX TODO rename done() ?
-    def complete():
-        """We have no more data to give to you.
+    def close():
+        """COPY transfer completed.
+
+        Return an object implementing the IResult interface
         """
 
 class IProducer(Interface):
-    """A file object, capable of writing/producing data.
+    """A file like object, capable of writing/producing data.
     """
 
     def description(ntuples, binaryTuples):
         """Description.
-
+        
+        ntuples is the number of columns in the data to be copied.
+        binaryTuples is 0 when the overall COPY format is textual,
+        1 when binary.
+        
         TODO in the current implementation, we ignore firmat codes.
         All columns have the same format.
         """
     
     def read():
-        """Request some data.
+        """Request/Produce some data.
         
         Return the empty string when no more data is available.
         It is not required to send a row.
+        """
+
+    def close():
+        """COPY transfer completed.
+
+        Return an object implementing the IResult interface
         """
 
 class IRowConsumer(Interface):
@@ -82,12 +98,12 @@ class IRowConsumer(Interface):
 
     Note that the data given is the raw data as returned by the
     backend.
-    It is responsibility to this interface to do parsing (thus it can
-    be optimized).
+    It is the responsibility to this interface to do parsing (thus it
+    can be optimized).
     """
 
     def description(data):
-        """Hanle the row description.
+        """Handle the row description.
         """
 
     def row(data):
@@ -95,13 +111,13 @@ class IRowConsumer(Interface):
         """
 
     # XXX cmdStatus, cmdTuples, oidValue
-    def complete(status, rows, oid):
+    def complete(status, oid, rows):
         """The command has complete, no more data.
 
-        status is the command status flag (usually the name of command)
-        rows is the number of rows affected by the command
+        status is the command status flag (usually the name of the command)
         oid is the OID of the inserted row, if available
-
+        rows is the number of rows affected by the command
+        
         Return an object implementing the IResult interface, with
         the result of the query.
         """
@@ -109,8 +125,6 @@ class IRowConsumer(Interface):
 
 class IRowDescription(Interface):
     """A row description.
-
-    XXX TODO
     """
 
     fname = Attribute("The field name")
@@ -120,15 +134,19 @@ class IRowDescription(Interface):
         )
     ftablecol = Attribute(
         """The attribute number of the column, if the fiels can be
-        identifies as a columns, 0 otherwis3"""
+        identified as a columns, 0 otherwise"""
         )
     ftype = Attribute("The object ID of the field's data type")
+    fsize = Attribute(
+        """"The data type size. Negative values denotes
+        variable-width types"""
+        )
     fmod = Attribute("The type modifier")
     fformat = Attribute(
         """The format code being used for the field.
         In the current implementation the format is the same for all
-        columns, so you can safely check the binaryTuples attributes of
-        the IPgResult"""
+        columns, so you can safely check the binaryTuples attribute of
+        the IResult"""
         )
     
 class IResult(Interface):
@@ -156,7 +174,7 @@ class IResult(Interface):
     
     status = Attribute("The status of the SQL command")
     cmdStatus = Attribute(
-        "The command status tag (usually the name of the command"
+        "The command status tag (usually the name of the command)"
         )
     cmdTuples = Attribute(
         "The number of the rows affected by the SQL command"
@@ -173,10 +191,10 @@ class IResult(Interface):
 
 #
 # Large Objects support
-# (implementations in fefs.py)
+# (implementation in fefs.py)
 #
 class ILargeObjectFactory(Interface):
-    """How to crate or open a large object on the database.
+    """How to create or open a large object on the database.
 
     XXX TODO.
 

@@ -45,6 +45,9 @@ CREATE TABLE TestCopy (
 INSERT INTO TestR VALUES (1, 'A');
 INSERT INTO TestR Values (2, 'B');
 
+INSERT INTO TestRW VALUES (1, 'A');
+INSERT INTO TestRW Values (2, 'B');
+
 
 -- privileges setup
 GRANT ALL PRIVILEGES ON TestR TO PUBLIC;
