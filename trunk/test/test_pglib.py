@@ -37,9 +37,18 @@ SSL = False
 
 
 # some error codes
-CANCEL_ERROR_CODE = "57014"
-AUTHENTICATION_ERROR_CODE = "28000"
-QUERY_ERROR_CODE = "42703"
+CANCEL_ERROR_CODE = "57014" # canceling statement due to user request'
+AUTHENTICATION_ERROR_CODE = "28000" # password authentication failed
+                                    # for user "user-name"
+# 28000 is also used for:
+# no pg_hba.conf entry for host "host-address", user "user-name",
+# database "database-name", SSL on/off
+QUERY_ERROR_CODE = "42703" # column "column-name" does not exist'
+COPY_ERROR_CODE = "42P01"  # relation "table-name" does not exist'
+
+# some type's oid
+INT_OID = 23
+TEXT_OID = 25
 
 
 # database setup
@@ -96,6 +105,7 @@ class TestFactory(protocol.PgFactory):
 
 copyData = "1|pglib\n2|manlio\n3|perillo\n"
 
+# implementation of required interfaces from ipg
 class Producer(object):
     implements(ipg.IProducer)
 
@@ -339,8 +349,21 @@ class TestSimpleQuery(TestCaseCommon):
             """)
             
         def cbQuery(result):
-            self.failUnlessEqual(result.status, protocol.PGRES_TUPLES_OK)
-            self.failUnlessEqual(result.rows, [["1", "A"], ["2", "B"]])
+            desc1, desc2 = result.descriptions
+            
+            self.failUnlessEqual(result.status,
+                                 protocol.PGRES_TUPLES_OK)
+            self.failUnlessEqual(result.nfields, 2)
+            self.failUnlessEqual(result.ntuples, 2)
+            
+            self.failUnlessEqual(desc1.ftype, INT_OID)
+            self.failUnlessEqual(desc2.ftype, TEXT_OID)
+            
+            self.failUnlessEqual(desc1.fname, "x")
+            self.failUnlessEqual(desc2.fname, "s")
+            
+            self.failUnlessEqual(result.rows, 
+                                 [["1", "A"], ["2", "B"]])
             
         d = self.login()
         return d.addCallback(cbLogin
@@ -354,7 +377,12 @@ class TestSimpleQuery(TestCaseCommon):
             """)
             
         def cbQuery(result):
-            self.failUnlessEqual(result.status, protocol.PGRES_COMMAND_OK)
+            self.failUnlessEqual(result.status,
+                                 protocol.PGRES_COMMAND_OK)
+            self.failUnlessEqual(result.nfields, 0)
+            self.failUnlessEqual(result.ntuples, 0)
+            
+            self.failUnlessEqual(result.descriptions, [])
             self.failUnlessEqual(result.rows, [])
             self.failUnlessEqual(result.cmdTuples, 1)
             
@@ -370,7 +398,12 @@ class TestSimpleQuery(TestCaseCommon):
             """)
             
         def cbQuery(result):
-            self.failUnlessEqual(result.status, protocol.PGRES_COMMAND_OK)
+            self.failUnlessEqual(result.status,
+                                 protocol.PGRES_COMMAND_OK)
+            self.failUnlessEqual(result.nfields, 0)
+            self.failUnlessEqual(result.ntuples, 0)
+            
+            self.failUnlessEqual(result.descriptions, [])
             self.failUnlessEqual(result.rows, [])
             self.failUnlessEqual(result.cmdTuples, 1)
             
@@ -386,7 +419,12 @@ class TestSimpleQuery(TestCaseCommon):
             """)
             
         def cbQuery(result):
-            self.failUnlessEqual(result.status, protocol.PGRES_COMMAND_OK)
+            self.failUnlessEqual(result.status,
+                                 protocol.PGRES_COMMAND_OK)
+            self.failUnlessEqual(result.nfields, 0)
+            self.failUnlessEqual(result.ntuples, 0)
+            
+            self.failUnlessEqual(result.descriptions, [])
             self.failUnlessEqual(result.rows, [])
             self.failUnlessEqual(result.cmdTuples, 1)
             
@@ -485,6 +523,7 @@ class TestSSL(TestCaseCommon):
     def setUp(self):
         pass
 
+
     if SSL:
         def testSSLRequire(self):
             def cbConnect(result):
@@ -530,6 +569,7 @@ class TestSSL(TestCaseCommon):
         
             # the connection is aborted
             return factory.closeDeferred.addCallback(lambda _: None)
+
             
     def testSSLDisable(self):
         def cbConnect(result):
@@ -621,6 +661,25 @@ class TestCopy(TestCaseCommon):
             # XXX the message should be:
             # COPY from stdin failed: copy failed
             self.failUnlessIn("copy failed", message)
+            
+            return reason
+        
+        d = self.login().addCallback(cbLogin
+                                     ).addErrback(ebCopy)
+        
+        return self.failUnlessFailure(d, protocol.PgError)
+
+    def testCopyOutFail(self):
+        def cbLogin(params):
+            self.protocol.consumer = Consumer()
+            
+            return self.protocol.execute("""
+            COPY XXX TO STDOUT WITH delimiter '|'
+            """)
+        
+        def ebCopy(reason):
+            code = reason.value.args["C"]
+            self.failUnlessEqual(code, COPY_ERROR_CODE)
             
             return reason
         

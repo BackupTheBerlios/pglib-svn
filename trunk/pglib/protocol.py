@@ -6,6 +6,9 @@ THIS SOFTWARE IS UNDER MIT LICENSE.
 Copyright (c) 2006 Perillo Manlio (manlio.perillo@gmail.com)
 
 Read LICENSE file for more informations.
+
+Credits: some code is adapted from pgasync
+         Copyright (c) 2005 Jamie Turner.  All rights reserved.
 """
 
 
@@ -21,7 +24,7 @@ from zope.interface import implements
 
 from twisted.python import log
 from twisted.internet import reactor, protocol, defer, interfaces
-
+from twisted.internet.address import IPv4Address, UNIXAddress 
 import ipg
 
 
@@ -44,7 +47,7 @@ CONNECTION_STARTED = 0           # waiting for connection to be made
 CONNECTION_MADE = 1              # connection ok; waiting to send
 CONNECTION_AWAITING_RESPONSE = 2 # waiting for a response from the
                                  # server # XXX what response?
-CONNECTION_AUTH_OK = 3           # received authentication; waitig for backend
+CONNECTION_AUTH_OK = 3           # received authentication; waiting for backend
                                  # start-up finish
 CONNECTION_SSL_STARTUP = 4       # negotiating SSL encryption
 CONNECTION_SETENV = 5            # negotiating enviroment-driven
@@ -95,7 +98,7 @@ class Error(Exception):
 class PgError(Error):
     """A wrapper for a dictionary with PostgreSQL error data.
     
-    XXX TODO
+    XXX TODO derive from a dict?
     """
     
     def __init__(self, args):
@@ -109,7 +112,7 @@ class PgError(Error):
 
     def errorField(self, field):
         """Return an individual field of an error report, or None if
-        the specified fiels is not included.
+        the specified field is not included.
         """
 
         return self.args.get(field, None)
@@ -147,7 +150,14 @@ class PgCancel(object):
         
         
         factory = CancelFactory(self.backendPID, self.cancelKey)
-        reactor.connectTCP(self.addr.host, self.addr.port, factory, timeout)
+
+        if isinstance(self.addr, IPv4Address):
+            reactor.connectTCP(self.addr.host, self.addr.port,
+                               factory, timeout)
+        elif isinstance(self.addr, UNIXAddress):
+            reactor.connectUNIX(self.addr.name, factory, timeout)
+        else:
+            return defer.fail(RuntimeError("invalid address"))
         
         # returns only when the request has been received by the backend
         return factory.deferred
@@ -179,7 +189,8 @@ class PgRequest(object):
 
 
 class PgProtocol(protocol.Protocol):
-    """The PostgreSQL protocol implementation, version 3.0.
+    """The PostgreSQL protocol implementation, frontend side, 
+    version 3.0.
 
     PostgreSQL support multiple request, but we choose to send only
     one request at time, since life is much easier.
@@ -196,6 +207,7 @@ class PgProtocol(protocol.Protocol):
 
     implements(ipg.IFastPath)
 
+    debug = True
     
     _buffer = ""
 
@@ -257,7 +269,7 @@ class PgProtocol(protocol.Protocol):
         # higher level interface (see fe.py).
         #
         # However "prefer" is still useful, since it allows to connect
-        # to both SSL enabled or disabled servers.
+        # to both SSL enabled and disabled servers.
         if self.factory.sslmode in ["disable", "allow"]:
             # no SSL negotiation
             self.dataReceived = self._dataReceived
@@ -356,7 +368,7 @@ class PgProtocol(protocol.Protocol):
             
             self.dataReceived = self._dataReceived
             
-            # no SSL available, now we can notify the factory
+            # ok, no SSL available; now we can notify the factory
             log.msg("no SSL available")
             self.factory.clientConnectionMade(self)
             
@@ -385,13 +397,15 @@ class PgProtocol(protocol.Protocol):
         header = pack("!cI", opcode, len(payload) + 4)
         self.transport.write(header + payload)
 
-        log.msg("request sent:", opcode)
+        if self.debug:
+            log.msg("request sent:", opcode)
             
     def messageReceived(self, opcode, payload):
         """Handle the message.
         """
 
-        log.msg("message received:", opcode)
+        if self.debug:
+            log.msg("message received:", opcode)
         
         # dispatch the message using python introspection
         method = getattr(self, "message_" + opcode, None)
@@ -579,14 +593,18 @@ class PgProtocol(protocol.Protocol):
             oid  = int(tags[1])
             rows = int(tags[2]) # XXX libpq uses a string
         elif n == 2:
-            oid = None
+            oid = 0
             rows = int(tags[1])
         else:
-            oid = None
+            oid = 0
             rows = 0
         
-        if cmdStatus == "COPY":
+        if cmdStatus == "COPY" and \
+                self.lastResult.status in (PGRES_COPY_OUT, PGRES_COPY_IN):
             # XXX we already have a result
+            assert rows == 0
+            assert oid == 0
+            
             self.lastResult.cmdStatus = cmdStatus
             self.lastResult.cmdTuples = rows
             self.lastResult.oidValue = oid
@@ -614,7 +632,7 @@ class PgProtocol(protocol.Protocol):
         
     
     #
-    # Function Call (aka Fast Path Interface)
+    # Function Call (aka Fast-Path Interface)
     #
     # Note: this seems to be obsolete, but it is still used (and it is
     # much simpler) for large objects support by libpq
@@ -668,7 +686,6 @@ class PgProtocol(protocol.Protocol):
             log.err(error)
             self.copyFail(str(error))
 
-            
         # send all data from producer to the backend
         reactor.callLater(0, self._copyData)
         
@@ -727,7 +744,7 @@ class PgProtocol(protocol.Protocol):
         """StartupMessage: login to the PostgreSQL database
         
         The only required option is user.
-        Optional parameters is database.
+        Optional parameters is database; defaults to user name.
 
         In addition any run-time parameters that can be set at backend
         start time may be listed.
@@ -964,7 +981,7 @@ class Result(object):
     nfields = None
     binaryTuples = None
     
-    status = PGRES_EMPTY_QUERY # convenience default
+    status = PGRES_EMPTY_QUERY # convenient default
     
     cmdStatus = None
     cmdTuples = None
@@ -990,9 +1007,9 @@ class RowConsumer(object):
 
         pos = 2
         for i in range(nfields):
-            ind = data.find("\0", pos)
-            fname = buf.read(ind - pos)
-            pos = ind + 19 # leading null plus 18 of int
+            idx = data.find("\0", pos)
+            fname = buf.read(idx - pos)
+            pos = idx + 19 # leading null plus 18 of int
             
             (
                 _, ftable, ftablecol, ftype, fsize, fmod, fformat
@@ -1003,6 +1020,7 @@ class RowConsumer(object):
             self.result.descriptions.append(desc)
 
     def row(self, data):
+        # parse the data
         buf = StringIO(data)
         
         (ntuples,) = unpack("!H", buf.read(2))
@@ -1023,10 +1041,12 @@ class RowConsumer(object):
         self.result.cmdTuples = rows
         self.result.oidValue = oid
         
+        self.result.nfields = len(self.result.descriptions)
         self.result.ntuples = len(self.result.rows)
         self.result.binaryTuples = 0 # XXX TODO
         
         if self.result.ntuples > 0:
+            # XXX what should return a SELECT with no rows?
             self.result.status = PGRES_TUPLES_OK
         else:
             self.result.status = PGRES_COMMAND_OK

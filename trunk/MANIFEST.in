@@ -1,0 +1,6 @@
+include README LICENSE INSTALL MANIFEST MANIFEST.in 
+include *.py
+recursive-include test *.py *.sql *.sh *.bat *.conf
+#recursive-include docs *.txt
+#recursive-include examples *.py
+#recursive-include benchmarks *.py

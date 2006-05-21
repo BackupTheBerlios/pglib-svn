@@ -13,13 +13,15 @@ from zope.interface import Interface, Attribute
 
 
 class IFastPath(Interface):
-    """The Fast Path Interface to server functions.
+    """The Fast-Path Interface to server functions.
     """
 
     def fn(fnid, fformat, *args):
         """Execute the function, given its oid.
 
         fformat is 0 for text arguments, or 1 for binary.
+
+        Return a deferred.
         """
 
 #     transactionStatus = Attribute(
@@ -84,7 +86,7 @@ class IProducer(Interface):
         """Request/Produce some data.
         
         Return the empty string when no more data is available.
-        It is not required to send a row.
+        It is not required to send one row at a time.
         """
 
     def close():
@@ -104,19 +106,24 @@ class IRowConsumer(Interface):
 
     def description(data):
         """Handle the row description.
+
+        This method will be called only if the command returns rows data.
         """
 
     def row(data):
         """Handle the row data.
         """
 
-    # XXX cmdStatus, cmdTuples, oidValue
+    # cmdStatus, oidValue, cmdTuples
     def complete(status, oid, rows):
         """The command has complete, no more data.
 
         status is the command status flag (usually the name of the command)
         oid is the OID of the inserted row, if available
         rows is the number of rows affected by the command
+        
+        Note that for commands that return no rows, this will be the
+        only method to be called.
         
         Return an object implementing the IResult interface, with
         the result of the query.
@@ -133,8 +140,8 @@ class IRowDescription(Interface):
         column, 0 otherwise"""
         )
     ftablecol = Attribute(
-        """The attribute number of the column, if the fiels can be
-        identified as a columns, 0 otherwise"""
+        """The attribute number of the column, if the field can be
+        identified as a column, 0 otherwise"""
         )
     ftype = Attribute("The object ID of the field's data type")
     fsize = Attribute(
@@ -144,6 +151,7 @@ class IRowDescription(Interface):
     fmod = Attribute("The type modifier")
     fformat = Attribute(
         """The format code being used for the field.
+        
         In the current implementation the format is the same for all
         columns, so you can safely check the binaryTuples attribute of
         the IResult"""
@@ -151,8 +159,6 @@ class IRowDescription(Interface):
     
 class IResult(Interface):
     """The result of a query.
-
-    XXX TODO
     """
     
     # XXX these two are not really useful
@@ -191,7 +197,7 @@ class IResult(Interface):
 
 #
 # Large Objects support
-# (implementation in fefs.py)
+# (implementation in fefs.py, or fe.py)
 #
 class ILargeObjectFactory(Interface):
     """How to create or open a large object on the database.
