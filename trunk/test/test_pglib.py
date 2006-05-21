@@ -24,8 +24,8 @@ from twisted.python import log
 from twisted.internet import reactor, defer, error
 from twisted.trial import unittest
 
-import ipg
-import protocol
+from pglib import ipg
+from pglib import protocol
 
 
 

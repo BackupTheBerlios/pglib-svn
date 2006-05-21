@@ -22,12 +22,16 @@ class PgConnectionOption(object):
         self.options = {}
 
 
-def connect(host, port=5432):
+def connectdb(host, port=5432):
     """Connect to a PostgreSQL database, returns a deferred.
 
     host can be a TCP address or Unix domain socket... see libpq.
 
     XXX TODO
+    This function should behave like PQconnectdb in the libpq library.
     """
 
     pass
+
+
+# XXX TODO add support for Large Objects (here or in fefs.py?)
