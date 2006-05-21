@@ -585,8 +585,14 @@ class PgProtocol(protocol.Protocol):
             oid = None
             rows = 0
         
-        self.lastResult = self.rowConsumer.complete(cmdStatus, oid,
-                                                    rows)
+        if cmdStatus == "COPY":
+            # XXX we already have a result
+            self.lastResult.cmdStatus = cmdStatus
+            self.lastResult.cmdTuples = rows
+            self.lastResult.oidValue = oid
+        else:
+            self.lastResult = self.rowConsumer.complete(cmdStatus,
+                                                        oid, rows)
     def message_T(self, data):
         """RowDescription: a description of row fields.
         """

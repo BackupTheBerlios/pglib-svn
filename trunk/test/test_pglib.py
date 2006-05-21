@@ -60,7 +60,6 @@ echoOid = int(echoOid.strip())
 loopOid = int(loopOid.strip())
 
 
-
 # utility function
 def waitFor(secs):
     """Return a deferred that will fire after the specified amount of
@@ -577,11 +576,13 @@ class TestCopy(TestCaseCommon):
             self.protocol.producer = Producer()
             
             return self.protocol.execute("""
-            COPY TestCopy FROM STDIN WITH delimiter '|'
+            COPY TestCopyRW FROM STDIN WITH delimiter '|'
             """)
                 
         def cbCopy(result):
+            self.failUnlessEqual(result.status, protocol.PGRES_COPY_IN)
             self.failUnlessEqual(result.cmdStatus, "COPY")
+#            self.failUnlessEqual(result.cmdTuples, 3)
                                  
         d = self.login().addCallback(cbLogin
                                      ).addCallback(cbCopy)
@@ -592,14 +593,14 @@ class TestCopy(TestCaseCommon):
             self.protocol.consumer = Consumer()
             
             return self.protocol.execute("""
-            COPY TestCopy TO STDOUT WITH delimiter '|'
+            COPY TestCopyR TO STDOUT WITH delimiter '|'
             """)
         
         def cbCopy(result):
             data = self.protocol.consumer.data
 
+            self.failUnlessEqual(result.status, protocol.PGRES_COPY_OUT)
             self.failUnlessEqual(result.cmdStatus, "COPY")
-            # XXX the data we write with testCopyIn
             self.failUnlessEqual(data, copyData)
                 
         d = self.login().addCallback(cbLogin

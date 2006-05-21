@@ -23,7 +23,8 @@ $$ LANGUAGE plpgsql;
 -- some table
 DROP TABLE TestRW;
 DROP TABLE TestR;
-DROP TABLE TestCopy;
+DROP TABLE TestCopyR;
+DROP TABLE TestCopyRW;
 
 
 CREATE TABLE TestRW (
@@ -36,7 +37,12 @@ CREATE TABLE TestR (
        s TEXT
 );
 
-CREATE TABLE TestCopy (
+CREATE TABLE TestCopyR (
+       x INTEGER,
+       s TEXT
+);
+
+CREATE TABLE TestCopyRW (
        x INTEGER,
        s TEXT
 );
@@ -49,7 +55,15 @@ INSERT INTO TestRW VALUES (1, 'A');
 INSERT INTO TestRW Values (2, 'B');
 
 
+COPY TestCopyR (x, s) FROM STDIN WITH DELIMITER '|';
+1|pglib
+2|manlio
+3|perillo
+\.
+
+
 -- privileges setup
 GRANT ALL PRIVILEGES ON TestR TO PUBLIC;
 GRANT ALL PRIVILEGES ON TestRW TO PUBLIC;
-GRANT ALL PRIVILEGES ON TestCopy TO PUBLIC;
+GRANT ALL PRIVILEGES ON TestCopyR TO PUBLIC;
+GRANT ALL PRIVILEGES ON TestCopyRW TO PUBLIC;
