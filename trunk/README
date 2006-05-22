@@ -1,22 +1,82 @@
 THIS SOFTWARE IS UNDER MIT LICENSE.  
-Copyright (C) 2005 Manlio Perillo
+Copyright (c) 2005 Manlio Perillo (manlio.perillo@gmail.com)
 
 Read LICENSE file for more informations.
 
 
 INTRODUCTION: 
-pqlib is an implementation of the PostgreSQL Protocol, version 3.0, in
-Python and Twisted.
+pqlib is an implementation of the PostgreSQL Protocol, frontend side,
+version 3.0, in Python and Twisted.
 
 It is somewhat similar to pgasync but it is a more usable and complete
 implementation, that try to follow the interface of the official C libpq.
 
+pglib is also extensible.
+See ipg.py for interface definitions.
+
+Also note that the default implementation does no conversion between
+database types and Python object.
+Only raw strings are used.
+
+This is a low level asynchrous interface to PostgreSQL.
+
 
 TODO:
-Support the extended query protocol
+- Support the extended query protocol.
+
+- The protocol allows the use of differents format code for each column
+(text or binary).
+To simplify the interface, pglib force the use of the same format code
+for all columns (or function's arguments and return values).
+
+- Add support for Large Objects.
+
+- Add an higher level connectdb, like that in libpq.
+
+
+TEST SUITE:
+The test suite requires a working PostgreSQL database, listening on
+localhost on port 5432 (the default one).
+
+Before running the test, with 
+trial test_pglib.py
+
+you have to run the setup script (setup.sh on POSIX systems and
+setup.bat on Windows).
+This script will create some test users and a test database.
+
+Note that this require psql to be in your PATH 
+(an issue only for Windows users)
+and the password of the database superuser (postgres).
+
+You will need the PL/pgSQL procedural language.
+
+If your database server has SSL enabled,
+ssl = on
+in postgresql.conf, 
+make sure to set SSL = True in test_pglib.py.
+
+Make sure to add entries in your pg_hba.conf file for the test users,
+as listed in setup.conf.
+Don't forget to delete or comment out any entry that match all
+users.
+
+To clean up your database cluster, do:
+psql -U postgres -d template1 -f unsetup.sql
 
 
 REQUIREMENTS: 
 Python 2.4 (http://python.org/)
 Twisted 2.2 (http://twistedmatrix.com)
+Zope Interfaces 3.1 (http://www.zope.org/Products/ZopeInterface)
+pyOpenSSL 0.6 (http://pyopenssl.sourceforge.net/)
+PostgreSQL 8.1 (http://www.ostgresql.org)
 
+pglib should works with Python 2.3, Twisted 2.0, Zope Interfaces 3.0
+and PostgreSQL 7.4.
+
+
+I have tested pglib on:
+- Windows XP SP2, using the latest versions of the required software
+- Linux Debian Sarge, using Python 2.3, Twisted 2.2, Zope Interfaces
+3.0 and PostgreSQL 7.4

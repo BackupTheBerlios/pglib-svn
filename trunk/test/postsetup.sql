@@ -4,20 +4,20 @@ Execute with psql -U pglib -d pglib
 */
 
 -- simple function
-CREATE OR REPLACE FUNCTION echo(data text) RETURNS text AS $$
+CREATE OR REPLACE FUNCTION echo(text) RETURNS text AS '
 BEGIN
-        RETURN data;
+        RETURN $1;
 END;
-$$ LANGUAGE plpgsql;
+' LANGUAGE plpgsql;
 
 
 -- function used to test cancel
-CREATE OR REPLACE FUNCTION loop() RETURNS void AS $$
+CREATE OR REPLACE FUNCTION loop() RETURNS void AS '
 BEGIN
         LOOP
         END LOOP;
 END;
-$$ LANGUAGE plpgsql;
+' LANGUAGE plpgsql;
 
 
 -- some table

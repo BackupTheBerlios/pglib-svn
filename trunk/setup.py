@@ -1,3 +1,4 @@
+#! /usr/bin/env python
 """pglib, setup file.
 
 $Id$

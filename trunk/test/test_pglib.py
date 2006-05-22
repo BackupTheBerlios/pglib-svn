@@ -37,14 +37,14 @@ SSL = False
 
 
 # some error codes
-CANCEL_ERROR_CODE = "57014" # canceling statement due to user request'
+CANCEL_ERROR_CODE = "57014" # canceling statement due to user request
 AUTHENTICATION_ERROR_CODE = "28000" # password authentication failed
                                     # for user "user-name"
 # 28000 is also used for:
 # no pg_hba.conf entry for host "host-address", user "user-name",
 # database "database-name", SSL on/off
-QUERY_ERROR_CODE = "42703" # column "column-name" does not exist'
-COPY_ERROR_CODE = "42P01"  # relation "table-name" does not exist'
+QUERY_ERROR_CODE = "42703" # column "column-name" does not exist
+COPY_ERROR_CODE = "42P01"  # relation "table-name" does not exist
 
 # some type's oid
 INT_OID = 23
@@ -474,6 +474,7 @@ class TestNotification(TestCaseCommon):
                                                          )
 
 class TestCancel(TestCaseCommon):
+    # XXX there seems to be problems with PostgreSQL 7.4 on Linux
     def testCancelVoid(self):
         def cbLogin(params):
             cancelObj = self.protocol.getCancel()
@@ -520,6 +521,8 @@ class TestCancel(TestCaseCommon):
 
 class TestSSL(TestCaseCommon):
     # XXX sslmode "prefer" and "allow" cannot be tested
+    # XXX it seems that the behaviour is different in Windows and
+    # Linux, problems with hostnossl
     def setUp(self):
         pass
 
@@ -652,7 +655,7 @@ class TestCopy(TestCaseCommon):
             self.protocol.producer = Producer(fail=True)
             
             return self.protocol.execute("""
-            COPY TestCopy FROM STDIN WITH delimiter '|'
+            COPY TestCopyRW FROM STDIN WITH delimiter '|'
             """)
                 
         def ebCopy(reason):
