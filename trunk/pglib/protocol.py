@@ -209,8 +209,6 @@ class PgProtocol(protocol.Protocol):
 
     debug = True
     
-    _buffer = ""
-
     status = CONNECTION_STARTED
     transationStatus = PGTRANS_IDLE
     parameterStatus = {} 
@@ -239,6 +237,8 @@ class PgProtocol(protocol.Protocol):
         
         self._queue = [] # we queue requests to the backend
         self._last = None # last request we made
+
+        self._buffer = ""
 
     def _getContextFactory(self):
         context = getattr(self.factory, "sslContext", None)
