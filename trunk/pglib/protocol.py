@@ -801,20 +801,24 @@ class PgProtocol(protocol.Protocol):
     def fn(self, fnid, fformat, *args):
         """FunctionCall: execute a function.
 
-        fformat can be 0 (text) or 1(binary)
+        fnid is the OID of the function to be executed.
+        fformat can be 0 (text) or 1 (binary)
         
         arguments must be strings
         
         XXX TODO: In the current implementation all
-        arguments (and the return value) must be of the same format.
+        arguments (and the return value) are forced to be of the same format.
         """
         
         prefix = pack("!IHHH", fnid, 1, fformat, len(args))
 
         data = []
         for a in args:
-            length = len(a)
-            buf = pack("!I%ds" % length, length, a)
+            if a is None:
+                buf = pack("!I", -1)
+            else:
+                length = len(a)
+                buf = pack("!I%ds" % length, length, a)
             data.append(buf)
         
         payload = prefix + ''.join(data) + pack("!H", fformat)
