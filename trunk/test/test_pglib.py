@@ -63,10 +63,10 @@ cmd = "psql -t --set format=unaligned -h " \
     "%s -p %d -U pglib -d pglib -c " % (host, port)
 
 echoOid = os.popen(cmd + query % "'echo'").read()
-loopOid = os.popen(cmd + query % "'loop'").read()
+sleepOid = os.popen(cmd + query % "'sleep'").read()
 
 echoOid = int(echoOid.strip())
-loopOid = int(loopOid.strip())
+sleepOid = int(sleepOid.strip())
 
 
 # utility function
@@ -436,6 +436,7 @@ class TestSimpleQuery(TestCaseCommon):
     
 
 class TestFunctionCall(TestCaseCommon):
+    # XXX TODO add a test for binary format
     def testFunction(self):
         def cbLogin(params):
             # call the echo function
@@ -497,8 +498,8 @@ class TestCancel(TestCaseCommon):
 
     def testCancel(self):
         def cbLogin(params):
-            # call the loop function
-            return self.protocol.fn(loopOid, 0)
+            # call the sleep function, waiting for 5 seconds
+            return self.protocol.fn(sleepOid, 0, "5")
 
         def ebCall(reason):
             code = reason.value.args["C"]

@@ -12,9 +12,24 @@ END;
 
 
 -- function used to test cancel
-CREATE OR REPLACE FUNCTION loop() RETURNS void AS '
+CREATE OR REPLACE FUNCTION sleep(integer) RETURNS void AS '
+DECLARE
+	start timestamp;
+	current timestamp;
+
+	duration interval;
 BEGIN
-        LOOP
+	-- a simple trick
+	duration := $1::text::interval;
+
+        -- make sure to use timeofday(), since now() does not change inside a transaction
+	SELECT INTO start timeofday()::timestamp;
+	
+	LOOP
+		SELECT INTO current timeofday()::timestamp;
+		IF (current - start) > duration THEN
+			EXIT;
+		END IF;
         END LOOP;
 END;
 ' LANGUAGE plpgsql;
