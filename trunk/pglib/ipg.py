@@ -19,9 +19,22 @@ class IFastPath(Interface):
     def fn(fnid, fformat, *args):
         """Execute the function, given its oid.
 
-        fformat is 0 for text arguments, or 1 for binary.
+        @param fnid: is the OID of the function to be executed
+        @type fnid: int
+        
+        @param fformat: the type format; can be 0 (text) or 1 (binary)
+        @type fformat: int
+        
+        @note: Arguments must be strings.
+        
+        @return: a deferred that will fire with the result of the
+                 function, as a C{str}
+        @rtype: L{twisted.internet.defer.Deferred}
+        
+        @todo: In the current implementation all
+               arguments (and the return value) are forced to be of
+               the same format.
 
-        Return a deferred.
         """
 
 #     transactionStatus = Attribute(
@@ -34,10 +47,16 @@ class IHandler(Interface):
 
     def notice(notice):
         """Handle a notice.
+
+        @param notice: the notice
+        @type notice: dict
         """
 
     def notify(notify):
         """Handle a notification.
+
+        @param notice: the notification
+        @type notice: L{pglib.protocol.Notification}
         """
 
 class IConsumer(Interface):
@@ -47,25 +66,34 @@ class IConsumer(Interface):
     def description(ntuples, binaryTuples):
         """Description.
 
-        ntuples is the number of columns in the data to be copied.
-        binaryTuples is 0 when the overall COPY format is textual,
-        1 when binary.
+        @param ntuples: the number of columns in the data to be
+                        copied
+        @type ntuples: int
         
-        TODO in the current implementation, we ignore format codes.
-        All columns have the same format.
-        This feature is supported in the protocol but not by the backend.
+        @param binaryTuples: 0 when the overall COPY format is textual,
+                             1 when binary
+        @type binaryTuples: int
+        
+        @todo: In the current implementation, we ignore format codes.
+               All columns have the same format.
+               This feature is supported in the protocol but not by
+               the backend.
         """
         
     def write(data):
         """Read/Consume data.
 
-        The backend always send one row at a time.
+        @param data: the data sent by the backend
+        @type data: str
+
+        @note: The backend always send one row at a time.
         """
 
     def close():
         """COPY transfer completed.
 
-        Return an object implementing the IResult interface
+        @return: an object implementing the L{pglib.ipg.IResult}
+                 interface
         """
 
 class IProducer(Interface):
@@ -75,60 +103,84 @@ class IProducer(Interface):
     def description(ntuples, binaryTuples):
         """Description.
         
-        ntuples is the number of columns in the data to be copied.
-        binaryTuples is 0 when the overall COPY format is textual,
-        1 when binary.
+        @param ntuples: the number of columns in the data to be copied.
+        @type ntuples: int
         
-        TODO in the current implementation, we ignore firmat codes.
-        All columns have the same format.
-        This feature is supported in the protocol but not by the backend.
+        @param binaryTuples: 0 when the overall COPY format is textual,
+                             1 when binary.
+        @type binaryTuples: int
+        
+        @todo: In the current implementation, we ignore firmat codes.
+               All columns have the same format.
+               This feature is supported in the protocol but not by
+               the backend.
         """
     
     def read():
         """Request/Produce some data.
         
-        Return the empty string when no more data is available.
-        It is not required to send one row at a time.
+        @return: the data to be copied in the backend.
+                 Return the empty string when no more data is available.
+
+        @note: It is not required to send one row at a time.
         """
 
     def close():
         """COPY transfer completed.
 
-        Return an object implementing the IResult interface
+        @return: an object implementing the L{pglib.ipg.IResult}
+                 interface
         """
 
 class IRowConsumer(Interface):
     """An object that handles row data.
 
-    Note that the data given is the raw data as returned by the
-    backend.
-    It is the responsibility to this interface to do parsing (thus it
-    can be optimized).
+    @note: the data given is the raw data as returned by the
+           backend.
+           It is the responsibility to this interface to do parsing 
+           (thus it can be optimized).
     """
 
     def description(data):
         """Handle the row description.
 
-        This method will be called only if the command returns rows data.
+        This method will be called only if the command returns rows
+        data.
+
+        @param data: the (raw) data containing the description of the
+                     result set. 
+                     Read the protocol specification for more info.
+        @type data: str
         """
 
     def row(data):
         """Handle the row data.
+
+        @param data: the (raw) data containing a row from a result
+                     set. 
+                     Read the protocol specification for more info. 
+        @type data: str
         """
 
     # cmdStatus, oidValue, cmdTuples
     def complete(status, oid, rows):
         """The command has complete, no more data.
 
-        status is the command status flag (usually the name of the command)
-        oid is the OID of the inserted row, if available
-        rows is the number of rows affected by the command
+        @param status: the command status flag (usually the name of the
+                       command)
+        @type status: str
         
-        Note that for commands that return no rows, this will be the
-        only method to be called.
+        @param oid: the OID of the inserted row, if available
+        @type oid: int
         
-        Return an object implementing the IResult interface, with
-        the result of the query.
+        @param rows: the number of rows affected by the command
+        @type rows: int
+        
+        @note: for commands that return no rows, this will be the
+               only method to be called.
+        
+        @return: an object implementing the L{pglib.ipg.IResult}
+                 interface, with the result of the query.
         """
 
 
@@ -204,19 +256,21 @@ class IResult(Interface):
 class ILargeObjectFactory(Interface):
     """How to create or open a large object on the database.
 
-    XXX TODO.
-
     To obtain a large object, do:
-    protocol = ...
 
-    loFactory = ILargeObjectFactory(protocol)
-    lo = loFactory.creat(...)
+      >>> protocol = ...
+      >>> loFactory = ILargeObjectFactory(protocol)
+      >>> lo = loFactory.creat(...)
+
     or
-    lo = loFactory.open(...)
+    
+      >>> lo = loFactory.open(...)
+
+    @todo: 
     """
 
 class ILargeObject(Interface):
     """A large object.
 
-    XXX TODO.
+    @todo: 
     """

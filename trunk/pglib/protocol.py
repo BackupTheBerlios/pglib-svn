@@ -7,8 +7,11 @@ Copyright (c) 2006 Perillo Manlio (manlio.perillo@gmail.com)
 
 Read LICENSE file for more informations.
 
-Credits: some code is adapted from pgasync
-         Copyright (c) 2005 Jamie Turner.  All rights reserved.
+Credits: 
+
+some code is adapted from pgasync.
+
+Copyright (c) 2005 Jamie Turner.  All rights reserved.
 """
 
 
@@ -98,7 +101,7 @@ class Error(Exception):
 class PgError(Error):
     """A wrapper for a dictionary with PostgreSQL error data.
     
-    XXX TODO derive from a dict?
+    @todo: derive from a dict?
     """
     
     def __init__(self, args):
@@ -113,6 +116,12 @@ class PgError(Error):
     def errorField(self, field):
         """Return an individual field of an error report, or None if
         the specified field is not included.
+
+        @param field: the field to extract
+        @type field: str
+
+        @return: the selected error field
+        @rtype: str
         """
 
         return self.args.get(field, None)
@@ -143,7 +152,9 @@ class PgCancel(object):
     def cancel(self, timeout=30):
         """Send a cancel request to the backend.
 
-        Return a deferred.
+        @return: a deferred that will fire when the request has been
+                 received by the backend.
+        @rtype: L{twisted.internet.defer.Deferred}
         """
         
         from twisted.internet import reactor
@@ -165,6 +176,18 @@ class PgCancel(object):
 
 class Notification(object):
     """A wrapper for notify data.
+
+    @ivar pid: the id of the process that issued a nofification
+    @type pid: int
+
+    @ivar name: the name of the notification
+    @type name: str
+    
+    @ivar extra: extra data associated with the notification.
+                 
+                 in the current version of the backend, C{extra} is
+                 always the empty string
+    @type extra: str
     """
     
     def __init__(self, pid, name, extra=None):
@@ -178,6 +201,15 @@ class Notification(object):
 
 class PgRequest(object):
     """A wrapper for a request to the backend.
+
+    @ivar opcode: the type of request
+    @type opcode: int
+
+    @ivar payload: the data associated with the request
+    @type payload: str
+
+    @ivar deferred: a deferred that will fire at command completion.
+    @type deferred: L{twisted.internet.defer.Deferred}
     """
     
     def __init__(self, opcode, payload):
@@ -201,12 +233,41 @@ class PgProtocol(protocol.Protocol):
 
     Whenever possible, we try to follow the interface of libpq.
     
-    To simplify the interface, all columns or routines pararameters
-    must be of the same format: text or binary.
+    @note: To simplify the interface, all columns or routines
+           pararameters must be of the same format: text or binary.
+
+    @ivar debug: set this to True for enabling more log messages
+    @type debug: bool
+
+    @ivar status: the status of the connection
+    @type status: int
+
+    @ivar transactionStatus: the status of the current transaction
+    @type transactionStatus: int
+
+    @ivar parameterStatus: backend runtime parameters
+    @type parameterStatus: dict
+
+    @ivar lastResult: the result set of the last query
+    @type lastResult: an object implementing the L{pglib.ipg.IResult}
+                      interface
+
+    @ivar lastNotice: last notice message sent by the backend
+    @type lastNotice: dict
+
+    @ivar lastError: last error reported by the backend
+    @type lastError: L{pglib.protocol.PgError}
+
+    @ivar protocolVersion: the protocol version in use
+    @type protocolVersion: int
+
+    @ivar serverVersion: the version of the backend
+    @type serverVersion: int
     """
 
     implements(ipg.IFastPath)
 
+    
     debug = True
     
     status = CONNECTION_STARTED
@@ -224,8 +285,11 @@ class PgProtocol(protocol.Protocol):
 
     
     def __init__(self, addr, handler=None, rowConsumer=None):
-        """Address is a IAddr address, handler is a IHandler object,
-        rowConsumer is a IRowConsumer object.
+        """Initialize the protocol.
+
+        @param addr: an L{twisted.internet.interfaces.IAddress} object
+        @param handler: a L{pglib.ipg.IHandler} object
+        @param rowConsumer: a L{pglib.ipg.IRowConsumer} object
         """
         
         self.addr = addr # used by cancel
@@ -743,11 +807,11 @@ class PgProtocol(protocol.Protocol):
     def login(self, **kwargs):
         """StartupMessage: login to the PostgreSQL database
         
-        The only required option is user.
-        Optional parameters is database; defaults to user name.
+        @keyword user: the user name (required)
+        @keyword database: defaults to user name.
 
-        In addition any run-time parameters that can be set at backend
-        start time may be listed.
+        @note: In addition any run-time parameters that can be set at
+               backend start time may be listed.
         """
 
         parameters = kwargs.copy()
@@ -784,7 +848,7 @@ class PgProtocol(protocol.Protocol):
     def passwordMessage(self, password):
         """PasswordMessage: send a password response.
 
-        internal method.
+        @note: internal method.
         """
 
         self._sendMessage("p", password + "\0")
@@ -792,7 +856,10 @@ class PgProtocol(protocol.Protocol):
     def execute(self, query, *args, **kwargs):
         """Query: execute a simple query.
         
-        XXX TODO string interpolation.
+        @param query: the query to execute
+        @type query: str
+
+        @todo: string interpolation.
         """
 
         request = PgRequest("Q", query + "\0")
@@ -801,13 +868,21 @@ class PgProtocol(protocol.Protocol):
     def fn(self, fnid, fformat, *args):
         """FunctionCall: execute a function.
 
-        fnid is the OID of the function to be executed.
-        fformat can be 0 (text) or 1 (binary)
+        @param fnid: is the OID of the function to be executed
+        @type fnid: int
         
-        arguments must be strings
+        @param fformat: the type format; can be 0 (text) or 1 (binary)
+        @type fformat: int
         
-        XXX TODO: In the current implementation all
-        arguments (and the return value) are forced to be of the same format.
+        @note: Arguments must be strings.
+        
+        @return: a deferred that will fire with the result of the
+                 function, as a C{str}
+        @rtype: L{twisted.internet.defer.Deferred}
+        
+        @todo: In the current implementation all
+               arguments (and the return value) are forced to be of
+               the same format.
         """
         
         prefix = pack("!IHHH", fnid, 1, fformat, len(args))
@@ -829,9 +904,9 @@ class PgProtocol(protocol.Protocol):
     def copyData(self, data):
         """Copydata: send data to backend, for COPY operations.
 
-        the frontend is not limited to send one row at a time.
+        The frontend is not limited to send one row at a time.
 
-        internal method
+        @note: internal method
         """
 
         self._sendMessage("d", data)
@@ -839,10 +914,11 @@ class PgProtocol(protocol.Protocol):
     def copyFail(self, error):
         """CopyFail: COPY transfer failed.
         
-        error is an error messages 
-        (used by the backend in its ErrorResponse)
+        @param error: an error messages 
+                      (used by the backend in its ErrorResponse)
+        @type error: str
         
-        internal method
+        @note: internal method
         """
 
         self._sendMessage("f", error + "\0")
@@ -850,7 +926,7 @@ class PgProtocol(protocol.Protocol):
     def copyDone(self):
         """CopyDone: COPY transfer complete.
         
-        internal method
+        @note: internal method
         """
 
         self._sendMessage("c", "")
@@ -865,7 +941,13 @@ class PgProtocol(protocol.Protocol):
         """CancelRequest: request a cancellation for the current
         query.
 
-        internal method
+        @param backendPID: the id of the process (its process id)
+        @type backendPID: int
+
+        @param cancelKey: the secret value supplied by the backend
+        @type cancelKey: int
+        
+        @note: internal method
         """
 
         payload = pack("!IIII", 16, PG_CANCEL_CODE, backendPID, cancelKey)
@@ -904,17 +986,20 @@ class PgFactory(protocol.ClientFactory):
     sslContext = None
     
     def __init__(self, sslmode="prefer"):
-        """sslmode determine whether or with what priority an SSL
-        connection will be negotiated.
+        """Initialize the factory.
+
+        @param sslmode: determine whether or with what priority an SSL 
+          connection will be negotiated.
         
-        There are four modes: "disable" will attempt only an
-        unencrypted SSL connection; "allow" will negotiate, trying
-        first a non-SSL connection, then if that fails, trying an
-        SSL connection; "prefer" (the default) will negotiate,
-        trying first an SSL connection, then if that fails, trying a
-        regular non-SSL conection; "require" will try only an SSL connection.
+          There are four modes: "disable" will attempt only an
+          unencrypted SSL connection; "allow" will negotiate, trying
+          first a non-SSL connection, then if that fails, trying an
+          SSL connection; "prefer" (the default) will negotiate,
+          trying first an SSL connection, then if that fails, trying a
+          regular non-SSL conection; "require" will try only an SSL connection.
+        @type sslmode: str
         
-        TODO: in this layer, "allow" and "prefer" cannot be fully supported.
+        @todo: in this layer, "allow" and "prefer" cannot be fully supported.
         """
         
         # we store sslmode here because it is used by cancel too.
@@ -956,6 +1041,10 @@ class CancelFactory(PgFactory):
 #
 
 class Handler(object):
+    """Default implementation for the L{pglib.ipg.IHandler}
+    interface.
+    """
+    
     implements(ipg.IHandler)
 
     def notice(self, notice):
@@ -966,6 +1055,10 @@ class Handler(object):
 
 
 class RowDescription(object):
+    """Default implementation for the L{pglib.ipg.IRowDescription}
+    interface.
+    """
+    
     implements(ipg.IRowDescription)
     
     def __init__(self, fname, ftable, ftablecol, ftype, fsize, fmod,
@@ -979,6 +1072,10 @@ class RowDescription(object):
         self.fformat = fformat
 
 class Result(object):
+    """Default implementation for the L{pglib.ipg.IResult}
+    interface.
+    """
+    
     implements(ipg.IResult)
 
     ntuples = None
@@ -996,7 +1093,11 @@ class Result(object):
         self.rows = []
         
 class RowConsumer(object):
-    # XXX TODO write an optimized implementation in C, like pgasync.
+    """Default implementation for the L{pglib.ipg.IRowConsumer}
+    interface.
+
+    # @toto: write an optimized implementation in C, like pgasync.
+    """
     
     implements(ipg.IRowConsumer)
     
