@@ -679,8 +679,8 @@ class PgProtocol(protocol.Protocol):
         formats = unpack("!" + "H" * ntuples, data[3:])
 
         try:
-            # XXX TODO we ignore formats, all columns have the same
-            # format code
+            # NOTE we ignore formats, since this feature is not yet
+            # implemented in the PostgreSQL backend
             self.producer.description(ntuples, binaryTuples)
         except Exception, error:
             log.err(error)
@@ -829,7 +829,7 @@ class PgProtocol(protocol.Protocol):
     def copyData(self, data):
         """Copydata: send data to backend, for COPY operations.
 
-        data needs not to be a row.
+        the frontend is not limited to send one row at a time.
 
         internal method
         """

@@ -53,6 +53,7 @@ class IConsumer(Interface):
         
         TODO in the current implementation, we ignore format codes.
         All columns have the same format.
+        This feature is supported in the protocol but not by the backend.
         """
         
     def write(data):
@@ -80,6 +81,7 @@ class IProducer(Interface):
         
         TODO in the current implementation, we ignore firmat codes.
         All columns have the same format.
+        This feature is supported in the protocol but not by the backend.
         """
     
     def read():
